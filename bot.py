@@ -14,11 +14,15 @@ from storage import (
     count_raid_applications,
     delete_raid_applications,
     clear_raid_parties,
+    get_application_by_character,
+    create_application,
 )
 
 from views import (
     GuildSettingView,
     RaidDeleteConfirmView,
+    ApplicationRaceServerView,
+    WeekdayMultiSelectView,
 )
 
 from atool import get_character_info, AtoolError
@@ -70,6 +74,10 @@ def get_server_name_by_code(server_code: str) -> str | None:
             return choice.name
     return None
 
+
+def format_days(days: list[str]) -> str:
+    return ", ".join(days) if days else "-"
+    
 
 # ========================================================
 # 봇 생성
@@ -580,6 +588,222 @@ async def search_atool(
             ephemeral=True,
         )
 
+
+# =========================================================
+# /신청 명령어
+# =========================================================
+
+@bot.tree.command(name="신청", description="레이드 신청")
+@app_commands.describe(
+    레이드이름="신청할 레이드 이름",
+    캐릭터명="아툴에서 조회할 캐릭터명",
+)
+async def apply_raid(
+    interaction: discord.Interaction,
+    레이드이름: str,
+    캐릭터명: str,
+):
+    if interaction.guild is None:
+        await interaction.response.send_message(
+            "서버 안에서만 사용할 수 있는 명령어입니다.",
+            ephemeral=True,
+        )
+        return
+
+    레이드이름 = 레이드이름.strip()
+    캐릭터명 = 캐릭터명.strip()
+
+    if not 레이드이름:
+        await interaction.response.send_message(
+            "레이드 이름이 비어 있습니다.",
+            ephemeral=True,
+        )
+        return
+
+    if not 캐릭터명:
+        await interaction.response.send_message(
+            "캐릭터명이 비어 있습니다.",
+            ephemeral=True,
+        )
+        return
+
+    await interaction.response.defer(ephemeral=True, thinking=True)
+
+    try:
+        # 1) 레이드 존재 확인
+        raid = get_raid(interaction.guild.id, 레이드이름)
+        if raid is None:
+            await interaction.followup.send(
+                f"`{레이드이름}` 레이드는 존재하지 않습니다.",
+                ephemeral=True,
+            )
+            return
+
+        # 2) guild 기본 설정 확인
+        guild_setting = get_guild_setting(interaction.guild.id)
+
+        if guild_setting is not None:
+            race_code = str(guild_setting["race_code"])
+            race_name = str(guild_setting["race_name"])
+            server_code = str(guild_setting["server_code"])
+            server_name = str(guild_setting["server_name"])
+            used_default_setting = True
+        else:
+            used_default_setting = False
+
+            race_server_view = ApplicationRaceServerView(user_id=interaction.user.id)
+            await interaction.followup.send(
+                "이 서버에는 기본 종족/서버 설정이 없습니다.\n"
+                "신청에 사용할 종족과 종족 서버를 선택하세요.",
+                view=race_server_view,
+                ephemeral=True,
+            )
+
+            timeout = await race_server_view.wait()
+            if timeout:
+                await interaction.followup.send(
+                    "종족/종족 서버 선택 시간이 초과되었습니다.",
+                    ephemeral=True,
+                )
+                return
+
+            if race_server_view.value != "submit":
+                return
+
+            race_code = str(race_server_view.selected_race_code)
+            race_name = str(race_server_view.selected_race_name)
+            server_code = str(race_server_view.selected_server_code)
+            server_name = str(race_server_view.selected_server_name)
+
+        # 3) 중복 신청 확인
+        existing = get_application_by_character(
+            guild_id=interaction.guild.id,
+            raid_name=레이드이름,
+            race_code=race_code,
+            server_code=server_code,
+            character_name=캐릭터명,
+        )
+        if existing is not None:
+            await interaction.followup.send(
+                f"`{레이드이름}` 레이드에는 이미 `{캐릭터명}` 캐릭터가 신청되어 있습니다.",
+                ephemeral=True,
+            )
+            return
+
+        # 4) 아툴 조회
+        data = get_character_info(
+            race_code=race_code,
+            race_name=race_name,
+            server_code=server_code,
+            server_name=server_name,
+            character_name=캐릭터명,
+        )
+
+        # 5) 입장 조건 검사
+        condition_type = str(raid["condition_type"])
+        condition_value = int(raid["condition_value"])
+
+        if condition_type == "item_level":
+            current_value = int(data["item_level"])
+            condition_label = "템렙"
+        else:
+            current_value = int(data["combat_score"])
+            condition_label = "아툴 점수"
+
+        if current_value < condition_value:
+            await interaction.followup.send(
+                f"신청 불가: `{레이드이름}` 레이드의 입장 조건은 "
+                f"`{condition_label} {condition_value}` 이상입니다.\n"
+                f"현재 캐릭터 수치: `{current_value}`",
+                ephemeral=True,
+            )
+            return
+
+        # 6) 가능 요일 / 특이사항 입력
+        weekday_view = WeekdayMultiSelectView(user_id=interaction.user.id)
+
+        await interaction.followup.send(
+            f"`{캐릭터명}` 신청을 진행합니다.\n"
+            "가능 요일을 선택하세요.",
+            view=weekday_view,
+            ephemeral=True,
+        )
+
+        timeout = await weekday_view.wait()
+        if timeout:
+            await interaction.followup.send(
+                "가능 요일 입력 시간이 초과되었습니다.",
+                ephemeral=True,
+            )
+            return
+
+        if weekday_view.value not in ("submit", "submit_with_note"):
+            return
+
+        available_days = weekday_view.selected_days
+        note = weekday_view.note
+
+        # 7) DB 저장
+        create_application(
+            {
+                "guild_id": interaction.guild.id,
+                "user_id": interaction.user.id,
+                "user_name": interaction.user.display_name,
+                "raid_name": 레이드이름,
+                "race_code": race_code,
+                "race_name": race_name,
+                "server_code": server_code,
+                "server_name": server_name,
+                "character_name": data["nickname"],
+                "job_name": data["job_name"],
+                "item_level": data["item_level"],
+                "combat_score": data["combat_score"],
+                "peak_combat_score": data["peak_combat_score"],
+                "available_days": available_days,
+                "note": note,
+            }
+        )
+
+        # 8) 공개 신청 완료 메시지
+        embed = discord.Embed(
+            title=f"[{레이드이름}] 신청 완료",
+            color=discord.Color.green(),
+        )
+        embed.add_field(name="캐릭터명", value=data["nickname"], inline=False)
+
+        # 관리자 기본 설정이 없었을 때만 종족/서버 표시
+        if not used_default_setting:
+            embed.add_field(
+                name="종족/종족서버",
+                value=f"{race_name} / {server_name}",
+                inline=False,
+            )
+
+        embed.add_field(name="직업", value=data["job_name"], inline=False)
+        embed.add_field(name="템렙", value=str(data["item_level"]), inline=False)
+        embed.add_field(name="아툴 점수", value=str(data["combat_score"]), inline=False)
+        embed.add_field(name="가능 요일", value=format_days(available_days), inline=False)
+
+        if note:
+            embed.add_field(name="특이사항", value=note, inline=False)
+
+        await interaction.followup.send(embed=embed, ephemeral=False)
+
+        await interaction.followup.send(
+            "신청이 저장되었습니다.",
+            ephemeral=True,
+        )
+
+    except AtoolError as e:
+        await interaction.followup.send(
+            f"아툴 조회 실패: {e}",
+            ephemeral=True,
+        )
+    except Exception as e:
+        await interaction.followup.send(
+            f"신청 처리 중 오류가 발생했습니다.\n`{e}`",
+            ephemeral=True,
+        )
 @bot.event
 async def on_ready():
     init_db()
