@@ -894,3 +894,492 @@ def list_applications_by_character_name(
             character_name.strip(),
         ),
     )
+
+# =========================================================
+# party_rules CRUD
+# =========================================================
+
+def save_party_rules(
+    guild_id: int,
+    raid_name: str,
+    slots: list[dict],
+    updated_by: int,
+) -> None:
+    """
+    slots 예시:
+    [
+        {"slot_index": 1, "role_type": "TANK", "preferred_jobs": ["수호성", "검성"]},
+        {"slot_index": 2, "role_type": "HEAL", "preferred_jobs": ["치유성"]},
+        ...
+    ]
+    """
+    raid_name = raid_name.strip()
+
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                DELETE FROM party_rules
+                WHERE guild_id = %s
+                  AND raid_name = %s;
+                """,
+                (guild_id, raid_name),
+            )
+
+            for slot in slots:
+                cur.execute(
+                    """
+                    INSERT INTO party_rules (
+                        guild_id,
+                        raid_name,
+                        slot_index,
+                        role_type,
+                        preferred_jobs,
+                        updated_by
+                    )
+                    VALUES (%s, %s, %s, %s, %s::jsonb, %s);
+                    """,
+                    (
+                        guild_id,
+                        raid_name,
+                        int(slot["slot_index"]),
+                        str(slot["role_type"]).strip(),
+                        json_dumps(slot.get("preferred_jobs", [])),
+                        updated_by,
+                    ),
+                )
+        conn.commit()
+
+
+def load_party_rules(guild_id: int, raid_name: str) -> list[dict]:
+    sql = """
+    SELECT
+        id,
+        guild_id,
+        raid_name,
+        slot_index,
+        role_type,
+        preferred_jobs,
+        updated_by,
+        updated_at
+    FROM party_rules
+    WHERE guild_id = %s
+      AND raid_name = %s
+    ORDER BY slot_index ASC;
+    """
+    return fetch_all(sql, (guild_id, raid_name.strip()))
+
+
+def delete_party_rules(guild_id: int, raid_name: str) -> int:
+    sql = """
+    DELETE FROM party_rules
+    WHERE guild_id = %s
+      AND raid_name = %s
+    RETURNING id;
+    """
+    rows = fetch_all(sql, (guild_id, raid_name.strip()))
+    return len(rows)
+
+
+def has_party_rules(guild_id: int, raid_name: str) -> bool:
+    sql = """
+    SELECT 1
+    FROM party_rules
+    WHERE guild_id = %s
+      AND raid_name = %s
+    LIMIT 1;
+    """
+    row = fetch_one(sql, (guild_id, raid_name.strip()))
+    return row is not None
+
+
+# =========================================================
+# raid_parties CRUD
+# =========================================================
+
+def replace_raid_parties(
+    guild_id: int,
+    raid_name: str,
+    weekday: str,
+    members: list[dict],
+) -> None:
+    """
+    members 예시:
+    [
+        {
+            "raid_no": 1,
+            "party_no": 1,
+            "slot_no": 1,
+            "status": "ASSIGNED",
+            "user_id": 123,
+            "user_name": "홍길동",
+            "race_code": "2",
+            "race_name": "마족",
+            "server_code": "2019",
+            "server_name": "진",
+            "character_name": "버터와플",
+            "job_name": "수호성",
+            "item_level": 3335,
+            "combat_score": 39187,
+            "note": "평일 22시 이후 가능",
+            "source_application_id": 10,
+        },
+        {
+            "raid_no": 3,
+            "party_no": None,
+            "slot_no": None,
+            "status": "WAITING",
+            ...
+        }
+    ]
+    """
+    raid_name = raid_name.strip()
+    weekday = weekday.strip()
+
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                DELETE FROM raid_parties
+                WHERE guild_id = %s
+                  AND raid_name = %s
+                  AND weekday = %s;
+                """,
+                (guild_id, raid_name, weekday),
+            )
+
+            for member in members:
+                cur.execute(
+                    """
+                    INSERT INTO raid_parties (
+                        guild_id,
+                        raid_name,
+                        weekday,
+                        raid_no,
+                        party_no,
+                        slot_no,
+                        status,
+                        user_id,
+                        user_name,
+                        race_code,
+                        race_name,
+                        server_code,
+                        server_name,
+                        character_name,
+                        job_name,
+                        item_level,
+                        combat_score,
+                        note,
+                        source_application_id
+                    )
+                    VALUES (
+                        %s, %s, %s,
+                        %s, %s, %s, %s,
+                        %s, %s,
+                        %s, %s, %s, %s,
+                        %s, %s, %s, %s,
+                        %s, %s
+                    );
+                    """,
+                    (
+                        guild_id,
+                        raid_name,
+                        weekday,
+                        int(member["raid_no"]),
+                        member.get("party_no"),
+                        member.get("slot_no"),
+                        str(member["status"]).strip(),
+                        int(member["user_id"]),
+                        str(member["user_name"]).strip(),
+                        str(member["race_code"]).strip(),
+                        str(member["race_name"]).strip(),
+                        str(member["server_code"]).strip(),
+                        str(member["server_name"]).strip(),
+                        str(member["character_name"]).strip(),
+                        str(member["job_name"]).strip(),
+                        int(member["item_level"]),
+                        int(member["combat_score"]),
+                        str(member.get("note", "")).strip() or None,
+                        member.get("source_application_id"),
+                    ),
+                )
+        conn.commit()
+
+
+def list_raid_parties(
+    guild_id: int,
+    raid_name: str,
+    weekday: str | None = None,
+) -> list[dict]:
+    if weekday is None:
+        sql = """
+        SELECT
+            id,
+            guild_id,
+            raid_name,
+            weekday,
+            raid_no,
+            party_no,
+            slot_no,
+            status,
+            user_id,
+            user_name,
+            race_code,
+            race_name,
+            server_code,
+            server_name,
+            character_name,
+            job_name,
+            item_level,
+            combat_score,
+            note,
+            source_application_id,
+            created_at,
+            updated_at
+        FROM raid_parties
+        WHERE guild_id = %s
+          AND raid_name = %s
+        ORDER BY weekday ASC, raid_no ASC, party_no ASC NULLS LAST, slot_no ASC NULLS LAST, character_name ASC;
+        """
+        return fetch_all(sql, (guild_id, raid_name.strip()))
+
+    sql = """
+    SELECT
+        id,
+        guild_id,
+        raid_name,
+        weekday,
+        raid_no,
+        party_no,
+        slot_no,
+        status,
+        user_id,
+        user_name,
+        race_code,
+        race_name,
+        server_code,
+        server_name,
+        character_name,
+        job_name,
+        item_level,
+        combat_score,
+        note,
+        source_application_id,
+        created_at,
+        updated_at
+    FROM raid_parties
+    WHERE guild_id = %s
+      AND raid_name = %s
+      AND weekday = %s
+    ORDER BY raid_no ASC, party_no ASC NULLS LAST, slot_no ASC NULLS LAST, character_name ASC;
+    """
+    return fetch_all(sql, (guild_id, raid_name.strip(), weekday.strip()))
+
+
+def list_assigned_party_members(
+    guild_id: int,
+    raid_name: str,
+    weekday: str | None = None,
+) -> list[dict]:
+    if weekday is None:
+        sql = """
+        SELECT *
+        FROM raid_parties
+        WHERE guild_id = %s
+          AND raid_name = %s
+          AND status = 'ASSIGNED'
+        ORDER BY weekday ASC, raid_no ASC, party_no ASC, slot_no ASC;
+        """
+        return fetch_all(sql, (guild_id, raid_name.strip()))
+
+    sql = """
+    SELECT *
+    FROM raid_parties
+    WHERE guild_id = %s
+      AND raid_name = %s
+      AND weekday = %s
+      AND status = 'ASSIGNED'
+    ORDER BY raid_no ASC, party_no ASC, slot_no ASC;
+    """
+    return fetch_all(sql, (guild_id, raid_name.strip(), weekday.strip()))
+
+
+def list_waiting_party_members(
+    guild_id: int,
+    raid_name: str,
+    weekday: str | None = None,
+) -> list[dict]:
+    if weekday is None:
+        sql = """
+        SELECT *
+        FROM raid_parties
+        WHERE guild_id = %s
+          AND raid_name = %s
+          AND status = 'WAITING'
+        ORDER BY weekday ASC, raid_no ASC, character_name ASC;
+        """
+        return fetch_all(sql, (guild_id, raid_name.strip()))
+
+    sql = """
+    SELECT *
+    FROM raid_parties
+    WHERE guild_id = %s
+      AND raid_name = %s
+      AND weekday = %s
+      AND status = 'WAITING'
+    ORDER BY raid_no ASC, character_name ASC;
+    """
+    return fetch_all(sql, (guild_id, raid_name.strip(), weekday.strip()))
+
+
+def get_party_member(
+    guild_id: int,
+    raid_name: str,
+    weekday: str,
+    race_code: str,
+    server_code: str,
+    character_name: str,
+) -> dict | None:
+    sql = """
+    SELECT *
+    FROM raid_parties
+    WHERE guild_id = %s
+      AND raid_name = %s
+      AND weekday = %s
+      AND race_code = %s
+      AND server_code = %s
+      AND character_name = %s;
+    """
+    return fetch_one(
+        sql,
+        (
+            guild_id,
+            raid_name.strip(),
+            weekday.strip(),
+            race_code.strip(),
+            server_code.strip(),
+            character_name.strip(),
+        ),
+    )
+
+
+def get_party_slot_member(
+    guild_id: int,
+    raid_name: str,
+    weekday: str,
+    raid_no: int,
+    party_no: int,
+    slot_no: int,
+) -> dict | None:
+    sql = """
+    SELECT *
+    FROM raid_parties
+    WHERE guild_id = %s
+      AND raid_name = %s
+      AND weekday = %s
+      AND raid_no = %s
+      AND party_no = %s
+      AND slot_no = %s
+      AND status = 'ASSIGNED';
+    """
+    return fetch_one(
+        sql,
+        (
+            guild_id,
+            raid_name.strip(),
+            weekday.strip(),
+            int(raid_no),
+            int(party_no),
+            int(slot_no),
+        ),
+    )
+
+
+def has_generated_parties(
+    guild_id: int,
+    raid_name: str,
+    weekday: str | None = None,
+) -> bool:
+    if weekday is None:
+        sql = """
+        SELECT 1
+        FROM raid_parties
+        WHERE guild_id = %s
+          AND raid_name = %s
+        LIMIT 1;
+        """
+        row = fetch_one(sql, (guild_id, raid_name.strip()))
+        return row is not None
+
+    sql = """
+    SELECT 1
+    FROM raid_parties
+    WHERE guild_id = %s
+      AND raid_name = %s
+      AND weekday = %s
+    LIMIT 1;
+    """
+    row = fetch_one(sql, (guild_id, raid_name.strip(), weekday.strip()))
+    return row is not None
+
+
+def move_party_member_to_slot(
+    party_row_id: int,
+    raid_no: int,
+    party_no: int,
+    slot_no: int,
+) -> None:
+    sql = """
+    UPDATE raid_parties
+    SET
+        raid_no = %s,
+        party_no = %s,
+        slot_no = %s,
+        status = 'ASSIGNED'
+    WHERE id = %s;
+    """
+    execute(sql, (int(raid_no), int(party_no), int(slot_no), int(party_row_id)))
+
+
+def move_party_member_to_waiting(
+    party_row_id: int,
+    raid_no: int,
+) -> None:
+    sql = """
+    UPDATE raid_parties
+    SET
+        raid_no = %s,
+        party_no = NULL,
+        slot_no = NULL,
+        status = 'WAITING'
+    WHERE id = %s;
+    """
+    execute(sql, (int(raid_no), int(party_row_id)))
+
+
+def update_party_member_position(
+    party_row_id: int,
+    raid_no: int,
+    party_no: int | None,
+    slot_no: int | None,
+    status: str,
+) -> None:
+    sql = """
+    UPDATE raid_parties
+    SET
+        raid_no = %s,
+        party_no = %s,
+        slot_no = %s,
+        status = %s
+    WHERE id = %s;
+    """
+    execute(
+        sql,
+        (
+            int(raid_no),
+            party_no,
+            slot_no,
+            str(status).strip(),
+            int(party_row_id),
+        ),
+    )
