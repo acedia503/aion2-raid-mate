@@ -459,3 +459,183 @@ class WeekdayMultiSelectView(discord.ui.View):
             view=self,
         )
         self.stop()
+
+        
+# =========================================================
+# 아이온2 종족 / 서버 데이터
+# =========================================================
+
+class ApplicationRaceSelect(discord.ui.Select):
+    def __init__(self, parent_view: "ApplicationRaceServerView"):
+        self.parent_view = parent_view
+
+        options = [
+            discord.SelectOption(label=race["name"], value=race["code"])
+            for race in RACE_OPTIONS
+        ]
+
+        super().__init__(
+            placeholder="아이온2 종족을 선택하세요",
+            min_values=1,
+            max_values=1,
+            options=options,
+            row=0,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.parent_view.user_id:
+            await interaction.response.send_message(
+                "이 UI는 명령어를 실행한 사용자만 사용할 수 있습니다.",
+                ephemeral=True,
+            )
+            return
+
+        selected_code = self.values[0]
+        selected_race = next((r for r in RACE_OPTIONS if r["code"] == selected_code), None)
+        if selected_race is None:
+            await interaction.response.send_message(
+                "선택한 종족 정보를 찾을 수 없습니다.",
+                ephemeral=True,
+            )
+            return
+
+        self.parent_view.selected_race_code = selected_race["code"]
+        self.parent_view.selected_race_name = selected_race["name"]
+
+        self.parent_view.selected_server_code = None
+        self.parent_view.selected_server_name = None
+        self.parent_view.refresh_server_select()
+
+        await interaction.response.edit_message(
+            content=(
+                f"종족: **{self.parent_view.selected_race_name}** 선택됨\n"
+                "이제 종족 서버를 선택하세요."
+            ),
+            view=self.parent_view,
+        )
+
+
+class ApplicationServerSelect(discord.ui.Select):
+    def __init__(self, parent_view: "ApplicationRaceServerView", race_code: str):
+        self.parent_view = parent_view
+        servers = get_servers_for_race(race_code)
+
+        options = [
+            discord.SelectOption(label=server["name"], value=server["code"])
+            for server in servers
+        ]
+
+        super().__init__(
+            placeholder="아이온2 종족 서버를 선택하세요",
+            min_values=1,
+            max_values=1,
+            options=options,
+            row=1,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.parent_view.user_id:
+            await interaction.response.send_message(
+                "이 UI는 명령어를 실행한 사용자만 사용할 수 있습니다.",
+                ephemeral=True,
+            )
+            return
+
+        selected_code = self.values[0]
+        servers = get_servers_for_race(self.parent_view.selected_race_code or "")
+        selected_server = next((s for s in servers if s["code"] == selected_code), None)
+
+        if selected_server is None:
+            await interaction.response.send_message(
+                "선택한 서버 정보를 찾을 수 없습니다.",
+                ephemeral=True,
+            )
+            return
+
+        self.parent_view.selected_server_code = selected_server["code"]
+        self.parent_view.selected_server_name = selected_server["name"]
+
+        await interaction.response.edit_message(
+            content=(
+                f"종족: **{self.parent_view.selected_race_name}**\n"
+                f"종족 서버: **{self.parent_view.selected_server_name}**\n"
+                "확인 버튼을 누르면 계속 진행합니다."
+            ),
+            view=self.parent_view,
+        )
+
+
+class ApplicationRaceServerView(discord.ui.View):
+    def __init__(self, user_id: int):
+        super().__init__(timeout=180)
+        self.user_id = user_id
+
+        self.selected_race_code: str | None = None
+        self.selected_race_name: str | None = None
+        self.selected_server_code: str | None = None
+        self.selected_server_name: str | None = None
+
+        self.value: str | None = None
+        # "submit" / "cancel"
+
+        self.race_select = ApplicationRaceSelect(self)
+        self.server_select: ApplicationServerSelect | None = None
+
+        self.add_item(self.race_select)
+
+    def refresh_server_select(self) -> None:
+        if self.server_select is not None:
+            self.remove_item(self.server_select)
+            self.server_select = None
+
+        if self.selected_race_code:
+            self.server_select = ApplicationServerSelect(self, self.selected_race_code)
+            self.add_item(self.server_select)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(
+                "이 UI는 명령어를 실행한 사용자만 사용할 수 있습니다.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    async def on_timeout(self) -> None:
+        for item in self.children:
+            item.disabled = True
+
+    @discord.ui.button(label="확인", style=discord.ButtonStyle.success, row=2)
+    async def confirm_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self.selected_race_code or not self.selected_server_code:
+            await interaction.response.send_message(
+                "종족과 종족 서버를 모두 선택하세요.",
+                ephemeral=True,
+            )
+            return
+
+        self.value = "submit"
+        for item in self.children:
+            item.disabled = True
+
+        await interaction.response.edit_message(
+            content=(
+                "종족/종족 서버 선택이 완료되었습니다.\n"
+                f"- 종족: **{self.selected_race_name}**\n"
+                f"- 종족 서버: **{self.selected_server_name}**"
+            ),
+            view=self,
+        )
+        self.stop()
+
+    @discord.ui.button(label="취소", style=discord.ButtonStyle.secondary, row=2)
+    async def cancel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.value = "cancel"
+        for item in self.children:
+            item.disabled = True
+
+        await interaction.response.edit_message(
+            content="종족/종족 서버 선택이 취소되었습니다.",
+            view=self,
+        )
+        self.stop()
