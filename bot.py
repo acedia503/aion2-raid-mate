@@ -77,6 +77,71 @@ def get_server_name_by_code(server_code: str) -> str | None:
 
 def format_days(days: list[str]) -> str:
     return ", ".join(days) if days else "-"
+
+
+# 레이드별 신청내역 그룹화
+def group_applications_by_raid(applications: list[dict]) -> dict[str, list[dict]]:
+    result: dict[str, list[dict]] = {}
+
+    for app in applications:
+        raid_name = app["raid_name"]
+        if raid_name not in result:
+            result[raid_name] = []
+        result[raid_name].append(app)
+
+    return result
+
+# 신청 한 줄 포맷 함수
+def format_application_line(app: dict) -> str:
+    days = app.get("available_days") or []
+    days_text = ", ".join(days) if days else "-"
+
+    note = (app.get("note") or "").strip()
+    note_text = note if note else "-"
+
+    return (
+        f"{app['character_name']} | "
+        f"{app['race_name']} / {app['server_name']} | "
+        f"{app['job_name']} | "
+        f"{app['item_level']} | "
+        f"{app['combat_score']} | "
+        f"{days_text} | "
+        f"{note_text}"
+    )
+
+# 레이드별 Embed 생성 함수
+def build_raid_application_embed(
+    raid_name: str,
+    applications: list[dict],
+) -> discord.Embed:
+
+    embed = discord.Embed(
+        title=f"[{raid_name}] 신청 내역",
+        color=discord.Color.blue(),
+    )
+
+    header = (
+        "캐릭터 | 종족/서버 | 직업 | 템렙 | 아툴 | 가능요일 | 특이사항"
+    )
+
+    separator = "-" * len(header)
+
+    lines = []
+
+    for app in applications:
+        lines.append(format_application_line(app))
+
+    body = "\n".join(lines) if lines else "-"
+
+    embed.description = (
+        "```"
+        f"{header}\n"
+        f"{separator}\n"
+        f"{body}"
+        "```"
+    )
+
+    return embed
     
 
 # ========================================================
@@ -804,6 +869,69 @@ async def apply_raid(
             f"신청 처리 중 오류가 발생했습니다.\n`{e}`",
             ephemeral=True,
         )
+
+
+# =========================================================
+# /신청확인
+# =========================================================
+
+@bot.tree.command(name="신청확인", description="내 레이드 신청 내역을 확인합니다.")
+@app_commands.describe(
+    레이드이름="확인할 레이드 이름 (선택)",
+)
+async def check_my_applications(
+    interaction: discord.Interaction,
+    레이드이름: str | None = None,
+):
+
+    if interaction.guild is None:
+        await interaction.response.send_message(
+            "서버 안에서만 사용할 수 있는 명령어입니다.",
+            ephemeral=True,
+        )
+        return
+
+    await interaction.response.defer(ephemeral=True)
+
+    try:
+        raid_name = 레이드이름.strip() if 레이드이름 else None
+
+        applications = list_user_applications(
+            guild_id=interaction.guild.id,
+            user_id=interaction.user.id,
+            raid_name=raid_name,
+        )
+
+        if not applications:
+            if raid_name:
+                await interaction.followup.send(
+                    f"`{raid_name}` 레이드 신청 내역이 없습니다.",
+                    ephemeral=True,
+                )
+            else:
+                await interaction.followup.send(
+                    "신청한 레이드 내역이 없습니다.",
+                    ephemeral=True,
+                )
+            return
+
+        grouped = group_applications_by_raid(applications)
+
+        await interaction.followup.send(
+            f"신청 내역 {len(applications)}건입니다.",
+            ephemeral=True,
+        )
+
+        for raid_name, apps in grouped.items():
+            embed = build_raid_application_embed(raid_name, apps)
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+    except Exception as e:
+        await interaction.followup.send(
+            f"신청 확인 중 오류가 발생했습니다.\n`{e}`",
+            ephemeral=True,
+        )
+
 @bot.event
 async def on_ready():
     init_db()
