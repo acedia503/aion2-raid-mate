@@ -472,7 +472,113 @@ async def delete_raid_command(interaction: discord.Interaction, 레이드이름:
                 ephemeral=True,
             )
 
+# =========================================================
+# /아툴
+# =========================================================
 
+# 1) 종족/서버 둘 다 안 넣음
+# 현재 디스코드 서버의 guild_settings 사용
+# 설정이 없으면 안내 메시지 출력
+
+# 2) 종족/서버 둘 다 넣음
+# 입력한 값으로 직접 조회
+
+# 3) 둘 중 하나만 넣음
+# 에러 메시지 출력
+
+@bot.tree.command(name="아툴", description="아이온2 캐릭터 아툴 정보를 조회합니다.")
+@app_commands.describe(
+    캐릭터명="조회할 캐릭터 이름",
+    종족="직접 지정할 종족 (선택)",
+    종족서버="직접 지정할 종족 서버 (선택)",
+)
+@app_commands.choices(종족=RACE_CHOICES, 종족서버=SERVER_CHOICES)
+async def search_atool(
+    interaction: discord.Interaction,
+    캐릭터명: str,
+    종족: app_commands.Choice[str] | None = None,
+    종족서버: app_commands.Choice[str] | None = None,
+):
+    if interaction.guild is None:
+        await interaction.response.send_message(
+            "서버 안에서만 사용할 수 있는 명령어입니다.",
+            ephemeral=True,
+        )
+        return
+
+    캐릭터명 = 캐릭터명.strip()
+    if not 캐릭터명:
+        await interaction.response.send_message(
+            "캐릭터명이 비어 있습니다.",
+            ephemeral=True,
+        )
+        return
+
+    # 둘 중 하나만 입력한 경우 에러
+    if (종족 is None) != (종족서버 is None):
+        await interaction.response.send_message(
+            "종족과 종족서버는 둘 다 입력하거나, 둘 다 입력하지 않아야 합니다.",
+            ephemeral=True,
+        )
+        return
+
+    await interaction.response.defer(ephemeral=True, thinking=True)
+
+    try:
+        # 1) 직접 입력한 경우
+        if 종족 is not None and 종족서버 is not None:
+            race_code = str(종족.value)
+            race_name = str(종족.name)
+            server_code = str(종족서버.value)
+            server_name = str(종족서버.name)
+
+        # 2) 직접 입력이 없으면 guild 기본 설정 사용
+        else:
+            setting = get_guild_setting(interaction.guild.id)
+            if setting is None:
+                await interaction.followup.send(
+                    "이 서버에는 기본 종족/서버 설정이 없습니다.\n"
+                    "관리자가 `/설정`을 먼저 해두었거나, `/아툴`에서 종족과 종족서버를 직접 모두 입력해야 합니다.",
+                    ephemeral=True,
+                )
+                return
+
+            race_code = str(setting["race_code"])
+            race_name = str(setting["race_name"])
+            server_code = str(setting["server_code"])
+            server_name = str(setting["server_name"])
+
+        data = get_character_info(
+            race_code=race_code,
+            race_name=race_name,
+            server_code=server_code,
+            server_name=server_name,
+            character_name=캐릭터명,
+        )
+
+        embed = discord.Embed(
+            title=f"{data['nickname']} 아툴 조회",
+            color=discord.Color.blue(),
+        )
+        embed.add_field(name="종족", value=data["race_name"], inline=False)
+        embed.add_field(name="종족서버", value=data["server_name"], inline=False)
+        embed.add_field(name="직업", value=data["job_name"], inline=False)
+        embed.add_field(name="템렙", value=str(data["item_level"]), inline=False)
+        embed.add_field(name="아툴 점수", value=str(data["combat_score"]), inline=False)
+        embed.add_field(name="최고 아툴 점수", value=str(data["peak_combat_score"]), inline=False)
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    except AtoolError as e:
+        await interaction.followup.send(
+            f"아툴 조회 실패: {e}",
+            ephemeral=True,
+        )
+    except Exception as e:
+        await interaction.followup.send(
+            f"아툴 조회 중 오류가 발생했습니다.\n`{e}`",
+            ephemeral=True,
+        )
 
 @bot.event
 async def on_ready():
