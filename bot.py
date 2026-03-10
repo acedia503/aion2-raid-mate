@@ -59,16 +59,7 @@ bot = commands.Bot(
 # 서버당 1개 설정만 유지
 
 @bot.tree.command(name="설정", description="이 디스코드 서버의 기본 아이온2 종족/서버를 설정합니다.")
-@app_commands.describe(
-    종족="기본 종족",
-    종족서버="기본 종족 서버",
-)
-@app_commands.choices(종족=RACE_CHOICES, 종족서버=SERVER_CHOICES)
-async def set_default_aion2(
-    interaction: discord.Interaction,
-    종족: app_commands.Choice[str],
-    종족서버: app_commands.Choice[str],
-):
+async def set_default_aion2(interaction: discord.Interaction):
     if interaction.guild is None:
         await interaction.response.send_message(
             "서버 안에서만 사용할 수 있는 명령어입니다.",
@@ -83,27 +74,16 @@ async def set_default_aion2(
         )
         return
 
-    try:
-        upsert_guild_setting(
-            guild_id=interaction.guild.id,
-            race_code=종족.value,
-            race_name=종족.name,
-            server_code=종족서버.value,
-            server_name=종족서버.name,
-            updated_by=interaction.user.id,
-        )
+    view = GuildSettingView(
+        guild_id=interaction.guild.id,
+        user_id=interaction.user.id,
+    )
 
-        await interaction.response.send_message(
-            f"기본 설정이 저장되었습니다.\n"
-            f"- 종족: {종족.name}\n"
-            f"- 종족서버: {종족서버.name}",
-            ephemeral=True,
-        )
-    except Exception as e:
-        await interaction.response.send_message(
-            f"설정 저장 중 오류가 발생했습니다.\n`{e}`",
-            ephemeral=True,
-        )
+    await interaction.response.send_message(
+        "아이온2 기본 설정을 진행합니다.\n먼저 종족을 선택하세요.",
+        view=view,
+        ephemeral=True,
+    )
 
 
 # =========================================================
