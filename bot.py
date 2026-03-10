@@ -16,6 +16,8 @@ from storage import (
     clear_raid_parties,
     get_application_by_character,
     create_application,
+    list_user_applications,
+    delete_application,
 )
 
 from views import (
@@ -23,6 +25,7 @@ from views import (
     RaidDeleteConfirmView,
     ApplicationRaceServerView,
     WeekdayMultiSelectView,
+    ApplicationCancelView,
 )
 
 from atool import get_character_info, AtoolError
@@ -142,7 +145,24 @@ def build_raid_application_embed(
     )
 
     return embed
-    
+
+# 취소 완료 메시지용
+def build_cancel_result_text(application: dict) -> str:
+    days = application.get("available_days") or []
+    days_text = ", ".join(days) if days else "-"
+    note = (application.get("note") or "").strip() or "-"
+
+    return (
+        f"신청이 취소되었습니다.\n"
+        f"- 레이드: {application['raid_name']}\n"
+        f"- 캐릭터: {application['character_name']}\n"
+        f"- 종족/종족서버: {application['race_name']} / {application['server_name']}\n"
+        f"- 직업: {application['job_name']}\n"
+        f"- 템렙: {application['item_level']}\n"
+        f"- 아툴 점수: {application['combat_score']}\n"
+        f"- 가능 요일: {days_text}\n"
+        f"- 특이사항: {note}"
+    )
 
 # ========================================================
 # 봇 생성
@@ -931,6 +951,96 @@ async def check_my_applications(
             f"신청 확인 중 오류가 발생했습니다.\n`{e}`",
             ephemeral=True,
         )
+
+
+# =========================================================
+# /신청취소
+# =========================================================
+
+@bot.tree.command(name="신청취소", description="내 레이드 신청을 취소합니다.")
+@app_commands.describe(
+    레이드이름="취소할 레이드 이름",
+    캐릭터명="취소할 캐릭터명",
+)
+async def cancel_application_command(
+    interaction: discord.Interaction,
+    레이드이름: str,
+    캐릭터명: str,
+):
+    if interaction.guild is None:
+        await interaction.response.send_message(
+            "서버 안에서만 사용할 수 있는 명령어입니다.",
+            ephemeral=True,
+        )
+        return
+
+    레이드이름 = 레이드이름.strip()
+    캐릭터명 = 캐릭터명.strip()
+
+    if not 레이드이름:
+        await interaction.response.send_message(
+            "레이드 이름이 비어 있습니다.",
+            ephemeral=True,
+        )
+        return
+
+    if not 캐릭터명:
+        await interaction.response.send_message(
+            "캐릭터명이 비어 있습니다.",
+            ephemeral=True,
+        )
+        return
+
+    await interaction.response.defer(ephemeral=True, thinking=True)
+
+    try:
+        applications = list_user_applications(
+            guild_id=interaction.guild.id,
+            user_id=interaction.user.id,
+            raid_name=레이드이름,
+        )
+
+        if not applications:
+            await interaction.followup.send(
+                f"`{레이드이름}` 레이드에 신청한 내역이 없습니다.",
+                ephemeral=True,
+            )
+            return
+
+        matched = [
+            app for app in applications
+            if str(app["character_name"]).strip() == 캐릭터명
+        ]
+
+        if not matched:
+            await interaction.followup.send(
+                f"`{레이드이름}` 레이드에 `{캐릭터명}` 캐릭터 신청 내역이 없습니다.",
+                ephemeral=True,
+            )
+            return
+
+        # 같은 레이드 안에서 같은 캐릭터명은 유니크 구조라 보통 1건이어야 함
+        target = matched[0]
+
+        deleted = delete_application(int(target["id"]))
+        if not deleted:
+            await interaction.followup.send(
+                "신청 취소에 실패했습니다.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.followup.send(
+            build_cancel_result_text(target),
+            ephemeral=True,
+        )
+
+    except Exception as e:
+        await interaction.followup.send(
+            f"신청 취소 중 오류가 발생했습니다.\n`{e}`",
+            ephemeral=True,
+        )
+
 
 @bot.event
 async def on_ready():
