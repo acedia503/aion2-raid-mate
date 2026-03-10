@@ -38,6 +38,11 @@ SERVER_OPTIONS = [
     {"name": "트리니엘", "code": "2020"},
 ]
 
+CONDITION_TYPE_CHOICES = [
+    app_commands.Choice(name="템렙", value="item_level"),
+    app_commands.Choice(name="아툴 점수", value="combat_score"),
+]
+
 
 # ========================================================
 # 공통 유틸 함수
