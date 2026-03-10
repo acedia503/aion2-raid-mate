@@ -112,7 +112,8 @@ def init_db() -> None:
             item_level INTEGER NOT NULL DEFAULT 0,
             combat_score INTEGER NOT NULL DEFAULT 0,
             peak_combat_score INTEGER NOT NULL DEFAULT 0,
-
+            
+            note TEXT,
             available_days JSONB NOT NULL DEFAULT '[]'::jsonb,
 
             created_at TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -167,6 +168,7 @@ def init_db() -> None:
             job_name VARCHAR(50) NOT NULL,
             item_level INTEGER NOT NULL DEFAULT 0,
             combat_score INTEGER NOT NULL DEFAULT 0,
+            note TEXT,
 
             source_application_id BIGINT,
             created_at TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -517,12 +519,13 @@ def create_application(data: dict) -> int:
         item_level,
         combat_score,
         peak_combat_score,
+        note,
         available_days
     )
     VALUES (
         %s, %s, %s, %s,
         %s, %s, %s, %s,
-        %s, %s, %s, %s, %s, %s::jsonb
+        %s, %s, %s, %s, %s, %s, %s::jsonb
     )
     RETURNING id;
     """
@@ -542,10 +545,10 @@ def create_application(data: dict) -> int:
             int(data["item_level"]),
             int(data["combat_score"]),
             int(data.get("peak_combat_score", 0)),
+            str(data.get("note", "")).strip() or None,
             json_dumps(data.get("available_days", [])),
         ),
     )
-
 
 def update_application(application_id: int, data: dict) -> None:
     sql = """
@@ -562,6 +565,7 @@ def update_application(application_id: int, data: dict) -> None:
         item_level = %s,
         combat_score = %s,
         peak_combat_score = %s,
+        note = %s,
         available_days = %s::jsonb
     WHERE id = %s;
     """
@@ -579,11 +583,11 @@ def update_application(application_id: int, data: dict) -> None:
             int(data["item_level"]),
             int(data["combat_score"]),
             int(data.get("peak_combat_score", 0)),
+            str(data.get("note", "")).strip() or None,
             json_dumps(data.get("available_days", [])),
             int(application_id),
         ),
     )
-
 
 def get_application_by_character(
     guild_id: int,
@@ -608,6 +612,7 @@ def get_application_by_character(
         item_level,
         combat_score,
         peak_combat_score,
+        note,
         available_days,
         created_at,
         updated_at
@@ -654,6 +659,7 @@ def get_user_application(
         item_level,
         combat_score,
         peak_combat_score,
+        note,
         available_days,
         created_at,
         updated_at
@@ -700,6 +706,7 @@ def list_user_applications(
             item_level,
             combat_score,
             peak_combat_score,
+            note,
             available_days,
             created_at,
             updated_at
@@ -726,6 +733,7 @@ def list_user_applications(
         item_level,
         combat_score,
         peak_combat_score,
+        note,
         available_days,
         created_at,
         updated_at
@@ -755,6 +763,7 @@ def list_raid_applications(guild_id: int, raid_name: str) -> list[dict]:
         item_level,
         combat_score,
         peak_combat_score,
+        note,
         available_days,
         created_at,
         updated_at
@@ -787,6 +796,7 @@ def list_raid_applications_by_weekday(
         item_level,
         combat_score,
         peak_combat_score,
+        note,
         available_days,
         created_at,
         updated_at
