@@ -4,10 +4,11 @@ from discord.ext import commands
 
 from storage import (
     init_db,
-    upsert_guild_setting,
     get_guild_setting,
     delete_guild_setting,
 )
+
+from views import GuildSettingView
 
 # ========================================================
 # 슬래시 선택지 정의
