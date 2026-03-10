@@ -13,16 +13,17 @@ from storage import (
 # 슬래시 선택지 정의
 # ========================================================
 
-RACE_CHOICES = [
-    app_commands.Choice(name="천족", value="ELYOS"),
-    app_commands.Choice(name="마족", value="ASMODIANS"),
+RACE_OPTIONS = [
+    {"name": "천족", "code": "1"},
+    {"name": "마족", "code": "2"},
 ]
 
-SERVER_CHOICES = [
-    app_commands.Choice(name="루", value="LU"),
-    app_commands.Choice(name="진", value="JIN"),
-    app_commands.Choice(name="시엘", value="SIEL"),
-    app_commands.Choice(name="이스라펠", value="ISRAFEL"),
+SERVER_OPTIONS = [
+    {"name": "루", "code": "1001"},
+    {"name": "시엘", "code": "1002"},
+    {"name": "이스라펠", "code": "1003"},
+    {"name": "루드라", "code": "2019"},
+    {"name": "트리니엘", "code": "2020"},
 ]
 
 
