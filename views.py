@@ -26,6 +26,21 @@ SERVER_OPTIONS = [
 ]
 
 
+# =========================================================
+# 요일 선택 데이터
+# =========================================================
+
+WEEKDAY_OPTIONS = [
+    discord.SelectOption(label="월", value="월"),
+    discord.SelectOption(label="화", value="화"),
+    discord.SelectOption(label="수", value="수"),
+    discord.SelectOption(label="목", value="목"),
+    discord.SelectOption(label="금", value="금"),
+    discord.SelectOption(label="토", value="토"),
+    discord.SelectOption(label="일", value="일"),
+]
+
+
 def get_servers_for_race(race_code: str) -> list[dict]:
     return [server for server in SERVER_OPTIONS if str(server["code"]).startswith(str(race_code))]
 
@@ -270,6 +285,177 @@ class RaidDeleteConfirmView(discord.ui.View):
             item.disabled = True
         await interaction.response.edit_message(
             content="레이드 삭제가 취소되었습니다.",
+            view=self,
+        )
+        self.stop()
+
+
+# =========================================================
+# 특이사항 입력
+# =========================================================
+
+class ApplicationNoteModal(discord.ui.Modal, title="특이사항 입력"):
+    특이사항 = discord.ui.TextInput(
+        label="특이사항",
+        placeholder="예: 평일 22시 이후 가능 / 트라이팟 가능",
+        required=False,
+        max_length=300,
+        style=discord.TextStyle.paragraph,
+    )
+
+    def __init__(self, parent_view: "WeekdayMultiSelectView"):
+        super().__init__()
+        self.parent_view = parent_view
+
+        if parent_view.note:
+            self.특이사항.default = parent_view.note
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        self.parent_view.note = str(self.특이사항.value).strip()
+        self.parent_view.value = "submit_with_note"
+
+        for item in self.parent_view.children:
+            item.disabled = True
+
+        await interaction.response.edit_message(
+            content=self.parent_view.build_summary_text(saved=False, note_entered=True),
+            view=self.parent_view,
+        )
+        self.parent_view.stop()
+
+
+class WeekdaySelect(discord.ui.Select):
+    def __init__(self, parent_view: "WeekdayMultiSelectView"):
+        self.parent_view = parent_view
+
+        super().__init__(
+            placeholder="가능 요일을 선택하세요 (중복 선택 가능)",
+            min_values=1,
+            max_values=7,
+            options=WEEKDAY_OPTIONS,
+            row=0,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.parent_view.user_id:
+            await interaction.response.send_message(
+                "이 신청 UI는 명령어를 실행한 사용자만 사용할 수 있습니다.",
+                ephemeral=True,
+            )
+            return
+
+        self.parent_view.selected_days = list(self.values)
+
+        await interaction.response.edit_message(
+            content=self.parent_view.build_summary_text(saved=False, note_entered=bool(self.parent_view.note)),
+            view=self.parent_view,
+        )
+
+
+class WeekdayMultiSelectView(discord.ui.View):
+    def __init__(
+        self,
+        user_id: int,
+        initial_days: list[str] | None = None,
+        initial_note: str | None = None,
+    ):
+        super().__init__(timeout=300)
+        self.user_id = user_id
+        self.selected_days: list[str] = initial_days[:] if initial_days else []
+        self.note: str = (initial_note or "").strip()
+
+        # 결과 상태
+        self.value: str | None = None
+        # "submit" / "submit_with_note" / "cancel"
+
+        self.weekday_select = WeekdaySelect(self)
+
+        if self.selected_days:
+            self.weekday_select.default_values = self.selected_days
+
+        self.add_item(self.weekday_select)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(
+                "이 신청 UI는 명령어를 실행한 사용자만 사용할 수 있습니다.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    async def on_timeout(self) -> None:
+        for item in self.children:
+            item.disabled = True
+
+    def build_summary_text(self, saved: bool = False, note_entered: bool = False) -> str:
+        days_text = ", ".join(self.selected_days) if self.selected_days else "-"
+        note_text = self.note if self.note else "-"
+
+        if saved:
+            return (
+                "신청 입력이 완료되었습니다.\n"
+                f"- 가능 요일: {days_text}\n"
+                f"- 특이사항: {note_text}"
+            )
+
+        if not self.selected_days:
+            return "가능 요일을 선택하세요."
+
+        if note_entered:
+            return (
+                "가능 요일이 선택되었습니다.\n"
+                f"- 가능 요일: {days_text}\n"
+                f"- 특이사항: {note_text}\n"
+                "저장 버튼을 누르면 완료됩니다."
+            )
+
+        return (
+            "가능 요일이 선택되었습니다.\n"
+            f"- 가능 요일: {days_text}\n"
+            "특이사항을 입력하거나, 바로 저장할 수 있습니다."
+        )
+
+    @discord.ui.button(label="특이사항 입력", style=discord.ButtonStyle.primary, row=1)
+    async def open_note_modal(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self.selected_days:
+            await interaction.response.send_message(
+                "먼저 가능 요일을 선택하세요.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.send_modal(ApplicationNoteModal(self))
+
+    @discord.ui.button(label="바로 저장", style=discord.ButtonStyle.success, row=1)
+    async def submit_without_note(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self.selected_days:
+            await interaction.response.send_message(
+                "먼저 가능 요일을 선택하세요.",
+                ephemeral=True,
+            )
+            return
+
+        self.value = "submit"
+
+        for item in self.children:
+            item.disabled = True
+
+        await interaction.response.edit_message(
+            content=self.build_summary_text(saved=True, note_entered=bool(self.note)),
+            view=self,
+        )
+        self.stop()
+
+    @discord.ui.button(label="취소", style=discord.ButtonStyle.secondary, row=1)
+    async def cancel_input(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.value = "cancel"
+
+        for item in self.children:
+            item.disabled = True
+
+        await interaction.response.edit_message(
+            content="신청 입력이 취소되었습니다.",
             view=self,
         )
         self.stop()
