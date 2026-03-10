@@ -21,21 +21,24 @@ from views import (
     RaidDeleteConfirmView,
 )
 
+from atool import get_character_info, AtoolError
+
 # ========================================================
 # 슬래시 선택지 정의
 # ========================================================
 
-RACE_OPTIONS = [
-    {"name": "천족", "code": "1"},
-    {"name": "마족", "code": "2"},
+RACE_CHOICES = [
+    app_commands.Choice(name="천족", value="1"),
+    app_commands.Choice(name="마족", value="2"),
 ]
 
-SERVER_OPTIONS = [
-    {"name": "루", "code": "1001"},
-    {"name": "시엘", "code": "1002"},
-    {"name": "이스라펠", "code": "1003"},
-    {"name": "루드라", "code": "2019"},
-    {"name": "트리니엘", "code": "2020"},
+SERVER_CHOICES = [
+    app_commands.Choice(name="루", value="1001"),
+    app_commands.Choice(name="시엘", value="1002"),
+    app_commands.Choice(name="이스라펠", value="1003"),
+    app_commands.Choice(name="진", value="2019"),
+    app_commands.Choice(name="트리니엘", value="2020"),
+    app_commands.Choice(name="카이시넬", value="2021"),
 ]
 
 CONDITION_TYPE_CHOICES = [
@@ -52,6 +55,20 @@ def is_admin(interaction: discord.Interaction) -> bool:
     if interaction.guild is None:
         return False
     return interaction.user.guild_permissions.administrator
+
+
+def get_race_name_by_code(race_code: str) -> str | None:
+    for choice in RACE_CHOICES:
+        if str(choice.value) == str(race_code):
+            return choice.name
+    return None
+
+
+def get_server_name_by_code(server_code: str) -> str | None:
+    for choice in SERVER_CHOICES:
+        if str(choice.value) == str(server_code):
+            return choice.name
+    return None
 
 
 # ========================================================
