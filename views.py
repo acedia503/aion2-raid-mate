@@ -462,7 +462,7 @@ class WeekdayMultiSelectView(discord.ui.View):
 
         
 # =========================================================
-# 아이온2 종족 / 서버 데이터
+# 신청용 종족/서버 선택 UI
 # =========================================================
 
 class ApplicationRaceSelect(discord.ui.Select):
