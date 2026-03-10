@@ -853,3 +853,44 @@ def delete_application_by_character(
         ),
     )
     return 1 if row else 0
+
+# 같은 레이드 + 같은 캐릭터명 신청 전부 찾는 함수
+def list_applications_by_character_name(
+    guild_id: int,
+    raid_name: str,
+    character_name: str,
+) -> list[dict]:
+    sql = """
+    SELECT
+        id,
+        guild_id,
+        user_id,
+        user_name,
+        raid_name,
+        race_code,
+        race_name,
+        server_code,
+        server_name,
+        character_name,
+        job_name,
+        item_level,
+        combat_score,
+        peak_combat_score,
+        note,
+        available_days,
+        created_at,
+        updated_at
+    FROM applications
+    WHERE guild_id = %s
+      AND raid_name = %s
+      AND character_name = %s
+    ORDER BY race_name ASC, server_name ASC, user_name ASC;
+    """
+    return fetch_all(
+        sql,
+        (
+            guild_id,
+            raid_name.strip(),
+            character_name.strip(),
+        ),
+    )
