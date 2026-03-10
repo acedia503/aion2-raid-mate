@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import json
 from contextlib import contextmanager
 
 import psycopg
@@ -274,6 +275,9 @@ def init_db() -> None:
             for sql in statements:
                 cur.execute(sql)
         conn.commit()
+
+def json_dumps(value) -> str:
+    return json.dumps(value, ensure_ascii=False)
 
 
 # =========================================================
