@@ -5,9 +5,9 @@ import discord
 
 from storage import upsert_guild_setting
 
-# =========================
+# =========================================================
 # 아이온2 종족 / 서버 데이터
-# =========================
+# =========================================================
 
 RACE_OPTIONS = [
     {"name": "천족", "code": "1"},
@@ -217,3 +217,59 @@ class GuildSettingView(discord.ui.View):
             content="설정이 취소되었습니다.",
             view=self,
         )
+
+
+# =========================================================
+# 신청/공대 삭제용
+# =========================================================
+
+class RaidDeleteConfirmView(discord.ui.View):
+    def __init__(self, guild_id: int, raid_name: str, user_id: int):
+        super().__init__(timeout=120)
+        self.guild_id = guild_id
+        self.raid_name = raid_name
+        self.user_id = user_id
+        self.value: str | None = None
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(
+                "이 삭제 확인 UI는 명령어를 실행한 관리자만 사용할 수 있습니다.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    async def on_timeout(self) -> None:
+        for item in self.children:
+            item.disabled = True
+
+    @discord.ui.button(label="신청자까지 같이 삭제", style=discord.ButtonStyle.danger)
+    async def delete_with_applications(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ):
+        self.value = "delete_with_applications"
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(
+            content=f"`{self.raid_name}` 레이드를 신청 내역/공대 내역과 함께 삭제합니다.",
+            view=self,
+        )
+        self.stop()
+
+    @discord.ui.button(label="취소", style=discord.ButtonStyle.secondary)
+    async def cancel_delete(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ):
+        self.value = "cancel"
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(
+            content="레이드 삭제가 취소되었습니다.",
+            view=self,
+        )
+        self.stop()
