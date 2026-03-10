@@ -491,3 +491,351 @@ def clear_raid_parties(guild_id: int, raid_name: str, weekday: str | None = None
     """
     rows = fetch_all(sql, (guild_id, raid_name.strip(), weekday.strip()))
     return len(rows)
+
+
+# =========================================================
+# applications CRUD
+# =========================================================
+
+def create_application(data: dict) -> int:
+    sql = """
+    INSERT INTO applications (
+        guild_id,
+        user_id,
+        user_name,
+        raid_name,
+        race_code,
+        race_name,
+        server_code,
+        server_name,
+        character_name,
+        job_name,
+        item_level,
+        combat_score,
+        peak_combat_score,
+        available_days
+    )
+    VALUES (
+        %s, %s, %s, %s,
+        %s, %s, %s, %s,
+        %s, %s, %s, %s, %s, %s::jsonb
+    )
+    RETURNING id;
+    """
+    return execute_returning_id(
+        sql,
+        (
+            int(data["guild_id"]),
+            int(data["user_id"]),
+            str(data["user_name"]).strip(),
+            str(data["raid_name"]).strip(),
+            str(data["race_code"]).strip(),
+            str(data["race_name"]).strip(),
+            str(data["server_code"]).strip(),
+            str(data["server_name"]).strip(),
+            str(data["character_name"]).strip(),
+            str(data["job_name"]).strip(),
+            int(data["item_level"]),
+            int(data["combat_score"]),
+            int(data.get("peak_combat_score", 0)),
+            json_dumps(data.get("available_days", [])),
+        ),
+    )
+
+
+def update_application(application_id: int, data: dict) -> None:
+    sql = """
+    UPDATE applications
+    SET
+        user_name = %s,
+        raid_name = %s,
+        race_code = %s,
+        race_name = %s,
+        server_code = %s,
+        server_name = %s,
+        character_name = %s,
+        job_name = %s,
+        item_level = %s,
+        combat_score = %s,
+        peak_combat_score = %s,
+        available_days = %s::jsonb
+    WHERE id = %s;
+    """
+    execute(
+        sql,
+        (
+            str(data["user_name"]).strip(),
+            str(data["raid_name"]).strip(),
+            str(data["race_code"]).strip(),
+            str(data["race_name"]).strip(),
+            str(data["server_code"]).strip(),
+            str(data["server_name"]).strip(),
+            str(data["character_name"]).strip(),
+            str(data["job_name"]).strip(),
+            int(data["item_level"]),
+            int(data["combat_score"]),
+            int(data.get("peak_combat_score", 0)),
+            json_dumps(data.get("available_days", [])),
+            int(application_id),
+        ),
+    )
+
+
+def get_application_by_character(
+    guild_id: int,
+    raid_name: str,
+    race_code: str,
+    server_code: str,
+    character_name: str,
+) -> dict | None:
+    sql = """
+    SELECT
+        id,
+        guild_id,
+        user_id,
+        user_name,
+        raid_name,
+        race_code,
+        race_name,
+        server_code,
+        server_name,
+        character_name,
+        job_name,
+        item_level,
+        combat_score,
+        peak_combat_score,
+        available_days,
+        created_at,
+        updated_at
+    FROM applications
+    WHERE guild_id = %s
+      AND raid_name = %s
+      AND race_code = %s
+      AND server_code = %s
+      AND character_name = %s;
+    """
+    return fetch_one(
+        sql,
+        (
+            guild_id,
+            raid_name.strip(),
+            race_code.strip(),
+            server_code.strip(),
+            character_name.strip(),
+        ),
+    )
+
+
+def get_user_application(
+    guild_id: int,
+    user_id: int,
+    raid_name: str,
+    race_code: str,
+    server_code: str,
+    character_name: str,
+) -> dict | None:
+    sql = """
+    SELECT
+        id,
+        guild_id,
+        user_id,
+        user_name,
+        raid_name,
+        race_code,
+        race_name,
+        server_code,
+        server_name,
+        character_name,
+        job_name,
+        item_level,
+        combat_score,
+        peak_combat_score,
+        available_days,
+        created_at,
+        updated_at
+    FROM applications
+    WHERE guild_id = %s
+      AND user_id = %s
+      AND raid_name = %s
+      AND race_code = %s
+      AND server_code = %s
+      AND character_name = %s;
+    """
+    return fetch_one(
+        sql,
+        (
+            guild_id,
+            user_id,
+            raid_name.strip(),
+            race_code.strip(),
+            server_code.strip(),
+            character_name.strip(),
+        ),
+    )
+
+
+def list_user_applications(
+    guild_id: int,
+    user_id: int,
+    raid_name: str | None = None,
+) -> list[dict]:
+    if raid_name is None:
+        sql = """
+        SELECT
+            id,
+            guild_id,
+            user_id,
+            user_name,
+            raid_name,
+            race_code,
+            race_name,
+            server_code,
+            server_name,
+            character_name,
+            job_name,
+            item_level,
+            combat_score,
+            peak_combat_score,
+            available_days,
+            created_at,
+            updated_at
+        FROM applications
+        WHERE guild_id = %s
+          AND user_id = %s
+        ORDER BY raid_name ASC, character_name ASC;
+        """
+        return fetch_all(sql, (guild_id, user_id))
+
+    sql = """
+    SELECT
+        id,
+        guild_id,
+        user_id,
+        user_name,
+        raid_name,
+        race_code,
+        race_name,
+        server_code,
+        server_name,
+        character_name,
+        job_name,
+        item_level,
+        combat_score,
+        peak_combat_score,
+        available_days,
+        created_at,
+        updated_at
+    FROM applications
+    WHERE guild_id = %s
+      AND user_id = %s
+      AND raid_name = %s
+    ORDER BY character_name ASC;
+    """
+    return fetch_all(sql, (guild_id, user_id, raid_name.strip()))
+
+
+def list_raid_applications(guild_id: int, raid_name: str) -> list[dict]:
+    sql = """
+    SELECT
+        id,
+        guild_id,
+        user_id,
+        user_name,
+        raid_name,
+        race_code,
+        race_name,
+        server_code,
+        server_name,
+        character_name,
+        job_name,
+        item_level,
+        combat_score,
+        peak_combat_score,
+        available_days,
+        created_at,
+        updated_at
+    FROM applications
+    WHERE guild_id = %s
+      AND raid_name = %s
+    ORDER BY combat_score DESC, item_level DESC, character_name ASC;
+    """
+    return fetch_all(sql, (guild_id, raid_name.strip()))
+
+
+def list_raid_applications_by_weekday(
+    guild_id: int,
+    raid_name: str,
+    weekday: str,
+) -> list[dict]:
+    sql = """
+    SELECT
+        id,
+        guild_id,
+        user_id,
+        user_name,
+        raid_name,
+        race_code,
+        race_name,
+        server_code,
+        server_name,
+        character_name,
+        job_name,
+        item_level,
+        combat_score,
+        peak_combat_score,
+        available_days,
+        created_at,
+        updated_at
+    FROM applications
+    WHERE guild_id = %s
+      AND raid_name = %s
+      AND available_days @> %s::jsonb
+    ORDER BY combat_score DESC, item_level DESC, character_name ASC;
+    """
+    return fetch_all(
+        sql,
+        (
+            guild_id,
+            raid_name.strip(),
+            json_dumps([weekday.strip()]),
+        ),
+    )
+
+
+def delete_application(application_id: int) -> int:
+    sql = """
+    DELETE FROM applications
+    WHERE id = %s
+    RETURNING id;
+    """
+    row = fetch_one(sql, (application_id,))
+    return 1 if row else 0
+
+
+def delete_application_by_character(
+    guild_id: int,
+    raid_name: str,
+    race_code: str,
+    server_code: str,
+    character_name: str,
+) -> int:
+    sql = """
+    DELETE FROM applications
+    WHERE guild_id = %s
+      AND raid_name = %s
+      AND race_code = %s
+      AND server_code = %s
+      AND character_name = %s
+    RETURNING id;
+    """
+    row = fetch_one(
+        sql,
+        (
+            guild_id,
+            raid_name.strip(),
+            race_code.strip(),
+            server_code.strip(),
+            character_name.strip(),
+        ),
+    )
+    return 1 if row else 0
