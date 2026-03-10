@@ -21,6 +21,15 @@ from storage import (
     list_applications_by_character_name,
     delete_application,
     update_application,
+    list_raid_applications_by_weekday,
+    list_raid_parties,
+    replace_raid_parties,
+)
+
+from raid_logic import (
+    build_balanced_raids,
+    exclude_already_generated_characters,
+    flatten_raids_to_party_rows,
 )
 
 from views import (
@@ -56,6 +65,8 @@ CONDITION_TYPE_CHOICES = [
     app_commands.Choice(name="템렙", value="item_level"),
     app_commands.Choice(name="아툴 점수", value="combat_score"),
 ]
+
+VALID_WEEKDAYS = {"월", "화", "수", "목", "금", "토", "일"}
 
 
 # ========================================================
@@ -217,6 +228,152 @@ def build_application_update_embed(
         embed.add_field(name="특이사항", value=note, inline=False)
 
     return embed
+
+# 긴 메시지 분할
+def split_text_by_lines(text: str, limit: int = 1800) -> list[str]:
+    if not text:
+        return ["-"]
+
+    lines = text.splitlines()
+    chunks: list[str] = []
+    current = ""
+
+    for line in lines:
+        next_text = line if not current else f"{current}\n{line}"
+        if len(next_text) <= limit:
+            current = next_text
+            continue
+
+        if current:
+            chunks.append(current)
+        current = line
+
+    if current:
+        chunks.append(current)
+
+    return chunks if chunks else ["-"]
+
+
+async def send_long_text_followup(
+    interaction: discord.Interaction,
+    text: str,
+    ephemeral: bool = False,
+    limit: int = 1800,
+):
+    chunks = split_text_by_lines(text, limit=limit)
+    for chunk in chunks:
+        await interaction.followup.send(
+            f"```text\n{chunk}\n```",
+            ephemeral=ephemeral,
+        )
+
+# 공대 결과 포맷
+def party_score_sum(party: list[dict]) -> int:
+    return sum(int(member.get("combat_score", 0)) for member in party)
+
+
+def raid_score_sum_for_display(raid: dict) -> int:
+    return party_score_sum(raid.get("party1", [])) + party_score_sum(raid.get("party2", []))
+
+
+def format_party_member_line(member: dict) -> str:
+    return (
+        f"{member.get('character_name', '-')} | "
+        f"{member.get('race_name', '-')} / {member.get('server_name', '-')} | "
+        f"{member.get('job_name', '-')} | "
+        f"{member.get('item_level', 0)} | "
+        f"{member.get('combat_score', 0)}"
+    )
+
+
+def format_raid_result_text(
+    raid_name: str,
+    weekday: str,
+    raids: list[dict],
+    waiting_members: list[dict],
+    source_note: str | None = None,
+) -> str:
+    lines: list[str] = []
+    lines.append(f"[{raid_name}] {weekday} 공대 생성 결과")
+    lines.append("")
+
+    for raid in raids:
+        raid_no = raid.get("raid_no", 0)
+        party1 = raid.get("party1", [])
+        party2 = raid.get("party2", [])
+
+        total_members = len(party1) + len(party2)
+        total_score = raid_score_sum_for_display(raid)
+        avg_score = total_score // total_members if total_members else 0
+
+        lines.append(f"{raid_no}공대 | 총 아툴 {total_score} | 평균 {avg_score}")
+
+        lines.append("  1파티")
+        if party1:
+            for member in party1:
+                lines.append(f"    - {format_party_member_line(member)}")
+        else:
+            lines.append("    - 비어 있음")
+
+        lines.append("")
+        lines.append("  2파티")
+        if party2:
+            for member in party2:
+                lines.append(f"    - {format_party_member_line(member)}")
+        else:
+            lines.append("    - 비어 있음")
+
+        lines.append("")
+
+    lines.append("대기 인원")
+    if waiting_members:
+        for member in waiting_members:
+            lines.append(f"  - {format_party_member_line(member)}")
+    else:
+        lines.append("  - 없음")
+
+    if source_note:
+        lines.append("")
+        lines.append(f"※ {source_note}")
+
+    return "\n".join(lines)
+
+
+def build_raid_result_embed(
+    raid_name: str,
+    weekday: str,
+    raids: list[dict],
+    waiting_members: list[dict],
+    source_note: str | None = None,
+) -> discord.Embed:
+    assigned_count = sum(len(raid.get("party1", [])) + len(raid.get("party2", [])) for raid in raids)
+    waiting_count = len(waiting_members)
+
+    embed = discord.Embed(
+        title=f"[{raid_name}] {weekday} 공대 생성 결과",
+        color=discord.Color.green(),
+    )
+    embed.add_field(name="생성 공대 수", value=str(len(raids)), inline=False)
+    embed.add_field(name="배정 인원", value=str(assigned_count), inline=False)
+    embed.add_field(name="대기 인원", value=str(waiting_count), inline=False)
+
+    if source_note:
+        embed.set_footer(text=source_note)
+
+    return embed
+
+# 기본 슬롯 규칙 함수
+def build_default_all_slot_rules() -> list[dict]:
+    return [
+        {"slot_index": 1, "role_type": "ALL", "preferred_jobs": []},
+        {"slot_index": 2, "role_type": "ALL", "preferred_jobs": []},
+        {"slot_index": 3, "role_type": "ALL", "preferred_jobs": []},
+        {"slot_index": 4, "role_type": "ALL", "preferred_jobs": []},
+        {"slot_index": 5, "role_type": "ALL", "preferred_jobs": []},
+        {"slot_index": 6, "role_type": "ALL", "preferred_jobs": []},
+        {"slot_index": 7, "role_type": "ALL", "preferred_jobs": []},
+        {"slot_index": 8, "role_type": "ALL", "preferred_jobs": []},
+    ]
 
 
 # ========================================================
@@ -1459,6 +1616,167 @@ async def update_application_command(
             f"신청 수정 중 오류가 발생했습니다.\n`{e}`",
             ephemeral=True,
         )
+
+
+# ========================================================
+# /공대생성
+# ========================================================
+
+# 관리자만 사용 가능
+
+@bot.tree.command(name="공대생성", description="레이드 공대를 자동 생성합니다. (1차 기본 규칙 버전)")
+@app_commands.describe(
+    레이드이름="공대를 생성할 레이드 이름",
+    요일="공대 생성 대상 요일",
+)
+async def create_parties_command(
+    interaction: discord.Interaction,
+    레이드이름: str,
+    요일: str,
+):
+    if interaction.guild is None:
+        await interaction.response.send_message(
+            "서버 안에서만 사용할 수 있는 명령어입니다.",
+            ephemeral=True,
+        )
+        return
+
+    if not is_admin(interaction):
+        await interaction.response.send_message(
+            "관리자만 사용할 수 있는 명령어입니다.",
+            ephemeral=True,
+        )
+        return
+
+    레이드이름 = 레이드이름.strip()
+    요일 = 요일.strip()
+
+    if not 레이드이름:
+        await interaction.response.send_message(
+            "레이드 이름이 비어 있습니다.",
+            ephemeral=True,
+        )
+        return
+
+    if 요일 not in VALID_WEEKDAYS:
+        await interaction.response.send_message(
+            "요일은 월, 화, 수, 목, 금, 토, 일 중 하나여야 합니다.",
+            ephemeral=True,
+        )
+        return
+
+    await interaction.response.defer(thinking=True)
+
+    try:
+        # 1) 레이드 존재 확인
+        raid = get_raid(interaction.guild.id, 레이드이름)
+        if raid is None:
+            await interaction.followup.send(
+                f"`{레이드이름}` 레이드는 존재하지 않습니다.",
+                ephemeral=True,
+            )
+            return
+
+        # 2) 해당 요일 신청자 조회
+        applications = list_raid_applications_by_weekday(
+            guild_id=interaction.guild.id,
+            raid_name=레이드이름,
+            weekday=요일,
+        )
+
+        if not applications:
+            await interaction.followup.send(
+                f"`{레이드이름}` 레이드의 `{요일}` 신청자가 없습니다.",
+                ephemeral=True,
+            )
+            return
+
+        # 3) 이미 생성된 공대 내역 조회
+        existing_rows = list_raid_parties(
+            guild_id=interaction.guild.id,
+            raid_name=레이드이름,
+            weekday=요일,
+        )
+
+        # 4) 이미 생성된 캐릭터 제외
+        candidates = exclude_already_generated_characters(applications, existing_rows)
+
+        if not candidates:
+            await interaction.followup.send(
+                f"`{레이드이름}` 레이드의 `{요일}` 신청자 중 "
+                "새로 생성할 수 있는 캐릭터가 없습니다.\n"
+                "이미 생성된 공대에 모두 포함되어 있을 수 있습니다.",
+                ephemeral=True,
+            )
+            return
+
+        # 5) 기본 규칙(ALL 8칸)
+        slot_rules = build_default_all_slot_rules()
+
+        # 6) 공대 생성
+        raids, waiting_members, warnings = build_balanced_raids(
+            candidates=candidates,
+            slot_rules=slot_rules,
+        )
+
+        if not raids and not waiting_members:
+            await interaction.followup.send(
+                "공대 생성 결과가 비어 있습니다.",
+                ephemeral=True,
+            )
+            return
+
+        # 7) DB 저장용 row 변환
+        rows = flatten_raids_to_party_rows(
+            guild_id=interaction.guild.id,
+            raid_name=레이드이름,
+            weekday=요일,
+            raids=raids,
+            waiting_members=waiting_members,
+        )
+
+        # 8) 저장
+        replace_raid_parties(
+            guild_id=interaction.guild.id,
+            raid_name=레이드이름,
+            weekday=요일,
+            members=rows,
+        )
+
+        # 9) 출력
+        source_note = "1차 기본 규칙(ALL 8칸) 기준 / 신청 DB 저장값 기준"
+        embed = build_raid_result_embed(
+            raid_name=레이드이름,
+            weekday=요일,
+            raids=raids,
+            waiting_members=waiting_members,
+            source_note=source_note,
+        )
+
+        text = format_raid_result_text(
+            raid_name=레이드이름,
+            weekday=요일,
+            raids=raids,
+            waiting_members=waiting_members,
+            source_note=source_note,
+        )
+
+        await interaction.followup.send(embed=embed, ephemeral=False)
+        await send_long_text_followup(interaction, text, ephemeral=False)
+
+        if warnings:
+            warning_text = "\n".join(f"- {w}" for w in warnings[:20])
+            await interaction.followup.send(
+                f"생성 참고 사항\n```text\n{warning_text}\n```",
+                ephemeral=True,
+            )
+
+    except Exception as e:
+        await interaction.followup.send(
+            f"공대 생성 중 오류가 발생했습니다.\n`{e}`",
+            ephemeral=True,
+        )
+
 
 @bot.event
 async def on_ready():
