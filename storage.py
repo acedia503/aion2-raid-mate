@@ -454,3 +454,40 @@ def count_raid_applications(guild_id: int, raid_name: str) -> int:
     if not row:
         return 0
     return int(row["cnt"])
+
+
+# =========================================================
+# 신청/공대 삭제용 함수
+# =========================================================
+
+def delete_raid_applications(guild_id: int, raid_name: str) -> int:
+    sql = """
+    DELETE FROM applications
+    WHERE guild_id = %s
+      AND raid_name = %s
+    RETURNING id;
+    """
+    rows = fetch_all(sql, (guild_id, raid_name.strip()))
+    return len(rows)
+
+
+def clear_raid_parties(guild_id: int, raid_name: str, weekday: str | None = None) -> int:
+    if weekday is None:
+        sql = """
+        DELETE FROM raid_parties
+        WHERE guild_id = %s
+          AND raid_name = %s
+        RETURNING id;
+        """
+        rows = fetch_all(sql, (guild_id, raid_name.strip()))
+        return len(rows)
+
+    sql = """
+    DELETE FROM raid_parties
+    WHERE guild_id = %s
+      AND raid_name = %s
+      AND weekday = %s
+    RETURNING id;
+    """
+    rows = fetch_all(sql, (guild_id, raid_name.strip(), weekday.strip()))
+    return len(rows)
