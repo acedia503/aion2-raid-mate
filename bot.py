@@ -93,9 +93,6 @@ def get_server_name_by_code(server_code: str) -> str | None:
     return None
 
 
-def format_days(days: list[str]) -> str:
-    return ", ".join(days) if days else "-"
-
 
 # 레이드별 신청내역 그룹화
 def group_applications_by_raid(applications: list[dict]) -> dict[str, list[dict]]:
