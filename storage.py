@@ -32,7 +32,6 @@ def fetch_one(sql: str, params: tuple | list | None = None) -> dict | None:
         with conn.cursor() as cur:
             cur.execute(sql, params or ())
             row = cur.fetchone()
-        conn.commit()
     return row
 
 
@@ -41,7 +40,6 @@ def fetch_all(sql: str, params: tuple | list | None = None) -> list[dict]:
         with conn.cursor() as cur:
             cur.execute(sql, params or ())
             rows = cur.fetchall()
-        conn.commit()
     return rows
 
 
@@ -278,7 +276,7 @@ def init_db() -> None:
                 cur.execute(sql)
         conn.commit()
 
-def json_dumps(value) -> str:
+def json_dumps(value: object) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
@@ -1321,40 +1319,6 @@ def has_generated_parties(
     """
     row = fetch_one(sql, (guild_id, raid_name.strip(), weekday.strip()))
     return row is not None
-
-
-def move_party_member_to_slot(
-    party_row_id: int,
-    raid_no: int,
-    party_no: int,
-    slot_no: int,
-) -> None:
-    sql = """
-    UPDATE raid_parties
-    SET
-        raid_no = %s,
-        party_no = %s,
-        slot_no = %s,
-        status = 'ASSIGNED'
-    WHERE id = %s;
-    """
-    execute(sql, (int(raid_no), int(party_no), int(slot_no), int(party_row_id)))
-
-
-def move_party_member_to_waiting(
-    party_row_id: int,
-    raid_no: int,
-) -> None:
-    sql = """
-    UPDATE raid_parties
-    SET
-        raid_no = %s,
-        party_no = NULL,
-        slot_no = NULL,
-        status = 'WAITING'
-    WHERE id = %s;
-    """
-    execute(sql, (int(raid_no), int(party_row_id)))
 
 
 def update_party_member_position(
