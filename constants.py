@@ -34,7 +34,7 @@ ROLE_JOB_OPTIONS = {
 }
 
 JOB_ROLE_MAP = {
-    "수호성": {"TANK", "DPS"},
+    "수호성": {"TANK"},
     "검성": {"TANK", "DPS"},
     "치유성": {"HEAL"},
     "호법성": {"HEAL", "DPS"},
