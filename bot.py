@@ -473,7 +473,7 @@ def build_party_check_embed(
     embed.add_field(name="생성 공대 수", value=str(len(raids)), inline=False)
     embed.add_field(name="배정 인원", value=str(assigned_count), inline=False)
     embed.add_field(name="대기 인원", value=str(waiting_count), inline=False)
-    embed.set_footer(text="※ 템렙/아툴 점수는 DB 저장 시점 기준입니다.")
+    embed.set_footer(text="※ 템렙/아툴 점수는 공대 생성 시점 기준입니다.")
     return embed
 
 
@@ -488,7 +488,7 @@ def format_party_check_text_for_weekday(
         weekday=weekday,
         raids=raids,
         waiting_members=waiting_members,
-        source_note="공대 확인의 템렙/아툴 점수는 DB 저장 시점 기준입니다.",
+        source_note="공대 확인의 템렙/아툴 점수는 공대 생성 시점 기준입니다.",
     )
 
 # 공대 수정용
@@ -537,8 +537,96 @@ def build_party_update_embed(
             inline=False,
         )
 
-    embed.set_footer(text="※ 템렙/아툴 점수는 DB 저장값 기준입니다.")
+    embed.set_footer(text="※ 템렙/아툴 점수는 공대 생성 시점 기준입니다.")
     return embed
+
+
+# Atool 재조회
+
+def refresh_candidate_with_atool(candidate: dict) -> dict:
+    """
+    applications의 신청 원본 데이터를 기반으로
+    공대 생성 시점 아툴 정보를 다시 조회해 최신값으로 덮어쓴다.
+    조회 실패 시 기존 DB 값 유지.
+    """
+    refreshed = dict(candidate)
+
+    try:
+        data = get_character_info(
+            race_code=str(candidate["race_code"]),
+            race_name=str(candidate["race_name"]),
+            server_code=str(candidate["server_code"]),
+            server_name=str(candidate["server_name"]),
+            character_name=str(candidate["character_name"]),
+        )
+
+        refreshed["character_name"] = data["nickname"]
+        refreshed["job_name"] = data["job_name"]
+        refreshed["item_level"] = data["item_level"]
+        refreshed["combat_score"] = data["combat_score"]
+        refreshed["peak_combat_score"] = data["peak_combat_score"]
+
+    except AtoolError:
+        # 재조회 실패 시 신청 DB 저장값 그대로 유지
+        pass
+    except Exception:
+        # 예기치 않은 오류도 생성 전체를 막지 않고 기존 값 유지
+        pass
+
+    return refreshed
+
+
+def refresh_candidates_for_party_generation(candidates: list[dict]) -> tuple[list[dict], list[str]]:
+    """
+    후보 전원을 공대 생성 시점 기준으로 재조회.
+    실패한 경우는 기존 값 유지하고 warning만 남긴다.
+    """
+    refreshed_candidates: list[dict] = []
+    warnings: list[str] = []
+
+    for candidate in candidates:
+        original_score = int(candidate.get("combat_score", 0))
+        original_level = int(candidate.get("item_level", 0))
+
+        refreshed = dict(candidate)
+
+        try:
+            data = get_character_info(
+                race_code=str(candidate["race_code"]),
+                race_name=str(candidate["race_name"]),
+                server_code=str(candidate["server_code"]),
+                server_name=str(candidate["server_name"]),
+                character_name=str(candidate["character_name"]),
+            )
+
+            refreshed["character_name"] = data["nickname"]
+            refreshed["job_name"] = data["job_name"]
+            refreshed["item_level"] = data["item_level"]
+            refreshed["combat_score"] = data["combat_score"]
+            refreshed["peak_combat_score"] = data["peak_combat_score"]
+
+            if (
+                int(data["combat_score"]) != original_score
+                or int(data["item_level"]) != original_level
+            ):
+                warnings.append(
+                    f"재조회 반영: {candidate['character_name']} | "
+                    f"템렙 {original_level}→{data['item_level']} | "
+                    f"아툴 {original_score}→{data['combat_score']}"
+                )
+
+        except AtoolError as e:
+            warnings.append(
+                f"재조회 실패(기존값 유지): {candidate['character_name']} | {e}"
+            )
+        except Exception as e:
+            warnings.append(
+                f"재조회 오류(기존값 유지): {candidate['character_name']} | {e}"
+            )
+
+        refreshed_candidates.append(refreshed)
+
+    return refreshed_candidates, warnings
 
 
 # ========================================================
@@ -1875,12 +1963,15 @@ async def create_parties_command(
             )
             return
 
-        # 5) 기존 규칙 불러오기
+        # 5) 공대 생성 시점 기준 아툴 재조회
+        refreshed_candidates, refresh_warnings = refresh_candidates_for_party_generation(candidates)
+
+        # 6) 기존 규칙 불러오기
         initial_rules = load_party_rules(interaction.guild.id, raid_name)
         if not initial_rules:
             initial_rules = build_default_all_slot_rules()
 
-        # 6) 규칙 UI
+        # 7) 규칙 UI
         rule_view = PartyRuleSetupView(
             user_id=interaction.user.id,
             initial_rules=initial_rules,
@@ -1909,7 +2000,7 @@ async def create_parties_command(
 
         slot_rules = rule_view.exported_rules
 
-        # 7) 규칙 저장
+        # 8) 규칙 저장
         save_party_rules(
             guild_id=interaction.guild.id,
             raid_name=raid_name,
@@ -1917,9 +2008,9 @@ async def create_parties_command(
             updated_by=interaction.user.id,
         )
 
-        # 8) 공대 생성
+        # 9) 재조회된 값으로 공대 생성
         raids, waiting_members, warnings = build_balanced_raids(
-            candidates=candidates,
+            candidates=refreshed_candidates,
             slot_rules=slot_rules,
         )
 
@@ -1930,7 +2021,7 @@ async def create_parties_command(
             )
             return
 
-        # 9) DB 저장용 row 변환
+        # 10) DB 저장용 row 변환
         rows = flatten_raids_to_party_rows(
             guild_id=interaction.guild.id,
             raid_name=raid_name,
@@ -1939,7 +2030,7 @@ async def create_parties_command(
             waiting_members=waiting_members,
         )
 
-        # 10) 저장
+        # 11) 저장
         replace_raid_parties(
             guild_id=interaction.guild.id,
             raid_name=raid_name,
@@ -1947,7 +2038,7 @@ async def create_parties_command(
             members=rows,
         )
 
-        # 11) 결과 출력
+        # 12) 결과 출력
         source_note = "설정한 공대 규칙 기준 / 신청 DB 저장값 기준"
         embed = build_raid_result_embed(
             raid_name=raid_name,
@@ -1968,8 +2059,12 @@ async def create_parties_command(
         await interaction.followup.send(embed=embed, ephemeral=False)
         await send_long_text_followup(interaction, text, ephemeral=False)
 
-        if warnings:
-            warning_text = "\n".join(f"- {w}" for w in warnings[:20])
+        all_warnings = []
+        all_warnings.extend(refresh_warnings)
+        all_warnings.extend(warnings)
+
+        if all_warnings:
+            warning_text = "\n".join(f"- {w}" for w in all_warnings[:30])
             await interaction.followup.send(
                 f"생성 참고 사항\n```text\n{warning_text}\n```",
                 ephemeral=True,
