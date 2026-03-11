@@ -2042,6 +2042,110 @@ async def check_parties_command(
                 f"공대 확인 중 오류가 발생했습니다.\n`{e}`",
                 ephemeral=True,
             )
+
+
+# ========================================================
+# /공대초기화
+# ========================================================
+
+# 관리자만 사용 가능
+# 요일 없으면 해당 레이드의 모든 공대가 삭제
+# 요일 있으면 해당 레이드의 해당 요일의 공대만 삭제
+
+@bot.tree.command(name="공대초기화", description="생성된 공대 내역을 초기화합니다.")
+@app_commands.describe(
+    레이드이름="초기화할 레이드 이름",
+    요일="초기화할 요일 (선택)",
+)
+async def reset_parties_command(
+    interaction: discord.Interaction,
+    레이드이름: str,
+    요일: str | None = None,
+):
+    if interaction.guild is None:
+        await interaction.response.send_message(
+            "서버 안에서만 사용할 수 있는 명령어입니다.",
+            ephemeral=True,
+        )
+        return
+
+    if not is_admin(interaction):
+        await interaction.response.send_message(
+            "관리자만 사용할 수 있는 명령어입니다.",
+            ephemeral=True,
+        )
+        return
+
+    레이드이름 = 레이드이름.strip()
+    weekday = 요일.strip() if 요일 else None
+
+    if not 레이드이름:
+        await interaction.response.send_message(
+            "레이드 이름이 비어 있습니다.",
+            ephemeral=True,
+        )
+        return
+
+    if weekday and weekday not in VALID_WEEKDAYS:
+        await interaction.response.send_message(
+            "요일은 월, 화, 수, 목, 금, 토, 일 중 하나여야 합니다.",
+            ephemeral=True,
+        )
+        return
+
+    await interaction.response.defer(ephemeral=True, thinking=True)
+
+    try:
+        raid = get_raid(interaction.guild.id, 레이드이름)
+        if raid is None:
+            await interaction.followup.send(
+                f"`{레이드이름}` 레이드는 존재하지 않습니다.",
+                ephemeral=True,
+            )
+            return
+
+        deleted_count = clear_raid_parties(
+            guild_id=interaction.guild.id,
+            raid_name=레이드이름,
+            weekday=weekday,
+        )
+
+        if weekday:
+            if deleted_count == 0:
+                await interaction.followup.send(
+                    f"`{레이드이름}` 레이드의 `{weekday}` 공대 생성 내역이 없습니다.",
+                    ephemeral=True,
+                )
+                return
+
+            await interaction.followup.send(
+                f"`{레이드이름}` 레이드의 `{weekday}` 공대 생성 내역이 초기화되었습니다.\n"
+                f"- 삭제된 행 수: {deleted_count}\n"
+                "- 신청 원본 내역은 유지됩니다.",
+                ephemeral=True,
+            )
+            return
+
+        if deleted_count == 0:
+            await interaction.followup.send(
+                f"`{레이드이름}` 레이드의 공대 생성 내역이 없습니다.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.followup.send(
+            f"`{레이드이름}` 레이드의 전체 공대 생성 내역이 초기화되었습니다.\n"
+            f"- 삭제된 행 수: {deleted_count}\n"
+            "- 신청 원본 내역은 유지됩니다.",
+            ephemeral=True,
+        )
+
+    except Exception as e:
+        await interaction.followup.send(
+            f"공대초기화 중 오류가 발생했습니다.\n`{e}`",
+            ephemeral=True,
+        )
+
 @bot.event
 async def on_ready():
     init_db()
