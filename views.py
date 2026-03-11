@@ -749,3 +749,64 @@ class ForceDeleteRaceServerView(discord.ui.View):
             view=self,
         )
         self.stop()
+
+
+# =========================================================
+# 공
+# =========================================================
+
+class PartyConfirmVisibilityView(discord.ui.View):
+    def __init__(self, user_id: int):
+        super().__init__(timeout=120)
+        self.user_id = user_id
+        self.value: str | None = None
+        # "private" / "public" / "cancel"
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(
+                "이 UI는 명령어를 실행한 관리자만 사용할 수 있습니다.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    async def on_timeout(self) -> None:
+        for item in self.children:
+            item.disabled = True
+
+    @discord.ui.button(label="나만 보기", style=discord.ButtonStyle.secondary)
+    async def private_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.value = "private"
+        for item in self.children:
+            item.disabled = True
+
+        await interaction.response.edit_message(
+            content="공대 확인 결과를 나만 보기로 표시합니다.",
+            view=self,
+        )
+        self.stop()
+
+    @discord.ui.button(label="공개", style=discord.ButtonStyle.primary)
+    async def public_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.value = "public"
+        for item in self.children:
+            item.disabled = True
+
+        await interaction.response.edit_message(
+            content="공대 확인 결과를 공개로 표시합니다.",
+            view=self,
+        )
+        self.stop()
+
+    @discord.ui.button(label="취소", style=discord.ButtonStyle.secondary)
+    async def cancel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.value = "cancel"
+        for item in self.children:
+            item.disabled = True
+
+        await interaction.response.edit_message(
+            content="공대 확인이 취소되었습니다.",
+            view=self,
+        )
+        self.stop()
