@@ -47,6 +47,7 @@ from views import (
     WeekdayMultiSelectView,
     ApplicationCancelView,
     ForceDeleteRaceServerView,
+    PartyRuleSetupView
 )
 
 from atool import get_character_info, AtoolError
@@ -2437,6 +2438,38 @@ async def update_party_member_command(
     except Exception as e:
         await interaction.followup.send(
             f"공대수정 중 오류가 발생했습니다.\n`{e}`",
+            ephemeral=True,
+        )
+
+
+# =========================================================
+# //공대 규칙 UI 테스트
+# =========================================================
+
+@bot.tree.command(name="공대규칙테스트", description="공대 규칙 UI 테스트")
+async def test_party_rules(interaction: discord.Interaction):
+    if interaction.guild is None:
+        await interaction.response.send_message("서버 안에서만 가능합니다.", ephemeral=True)
+        return
+
+    if not is_admin(interaction):
+        await interaction.response.send_message("관리자만 가능합니다.", ephemeral=True)
+        return
+
+    view = PartyRuleSetupView(user_id=interaction.user.id)
+    await interaction.response.send_message(
+        view.build_summary_text(),
+        view=view,
+        ephemeral=True,
+    )
+
+    timeout = await view.wait()
+    if timeout:
+        return
+
+    if view.value == "submit" and view.exported_rules is not None:
+        await interaction.followup.send(
+            f"규칙 저장 완료\n```python\n{view.exported_rules}\n```",
             ephemeral=True,
         )
 
