@@ -24,20 +24,6 @@ JOB_ROLE_MAP: dict[str, set[str]] = {
 # 정규화 / 공통 유틸
 # =========================
 
-def safe_int(value: Any, default: int = 0) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
-
-
-def safe_str(value: Any, default: str = "") -> str:
-    if value is None:
-        return default
-    text = str(value).strip()
-    return text if text else default
-
-
 def normalize_application_row(row: dict) -> dict:
     return {
         "id": safe_int(row.get("id")),
