@@ -100,8 +100,9 @@ def find_replace_candidate_in_party(
 
 
 # =========================================================
-# 5. 공대 수정용 유
+# 5. 공대 수정용 유틸
 # =========================================================
 
-remove_member_from_saved_parties
-place_member_to_destination
+# 해당 보조 함수 찾으면 여기에 넣기
+# remove_member_from_saved_parties
+# place_member_to_destination
