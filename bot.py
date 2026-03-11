@@ -93,42 +93,7 @@ def get_server_name_by_code(server_code: str) -> str | None:
     return None
 
 
-# 취소 완료 메시지용
-def build_cancel_result_text(application: dict) -> str:
-    days = application.get("available_days") or []
-    days_text = ", ".join(days) if days else "-"
-    note = (application.get("note") or "").strip() or "-"
 
-    return (
-        f"신청이 취소되었습니다.\n"
-        f"- 레이드: {application['raid_name']}\n"
-        f"- 캐릭터: {application['character_name']}\n"
-        f"- 종족/종족서버: {application['race_name']} / {application['server_name']}\n"
-        f"- 직업: {application['job_name']}\n"
-        f"- 템렙: {application['item_level']}\n"
-        f"- 아툴 점수: {application['combat_score']}\n"
-        f"- 가능 요일: {days_text}\n"
-        f"- 특이사항: {note}"
-    )
-
-# 강제삭제 결과 메시지용
-def build_force_delete_result_text(application: dict) -> str:
-    days = application.get("available_days") or []
-    days_text = ", ".join(days) if days else "-"
-    note = (application.get("note") or "").strip() or "-"
-
-    return (
-        f"신청 내역이 강제삭제되었습니다.\n"
-        f"- 신청자: {application['user_name']}\n"
-        f"- 레이드: {application['raid_name']}\n"
-        f"- 캐릭터: {application['character_name']}\n"
-        f"- 종족/종족서버: {application['race_name']} / {application['server_name']}\n"
-        f"- 직업: {application['job_name']}\n"
-        f"- 템렙: {application['item_level']}\n"
-        f"- 아툴 점수: {application['combat_score']}\n"
-        f"- 가능 요일: {days_text}\n"
-        f"- 특이사항: {note}"
-    )
 
 
 
