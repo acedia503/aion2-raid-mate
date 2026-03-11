@@ -5,7 +5,19 @@
 # 1. 파티 상태 조회
 # =========================================================
 
-list_members_in_party
+def list_members_in_party(rows: list[dict], raid_no: int, party_no: int) -> list[dict]:
+    result: list[dict] = []
+    for row in rows:
+        member = normalize_party_member_row(row)
+        if (
+            safe_int(member.get("raid_no")) == safe_int(raid_no)
+            and safe_int(member.get("party_no")) == safe_int(party_no)
+            and safe_str(member.get("status")) == "ASSIGNED"
+        ):
+            result.append(member)
+    result.sort(key=lambda x: safe_int(x.get("slot_no")))
+    return result
+  
 get_party_size
 
 
