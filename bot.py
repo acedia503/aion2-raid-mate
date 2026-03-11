@@ -64,27 +64,10 @@ from atool import get_character_info, AtoolError
 # 슬래시 선택지 정의
 # ========================================================
 
-RACE_CHOICES = [
-    app_commands.Choice(name="천족", value="1"),
-    app_commands.Choice(name="마족", value="2"),
-]
-
-SERVER_CHOICES = [
-    app_commands.Choice(name="루", value="1001"),
-    app_commands.Choice(name="시엘", value="1002"),
-    app_commands.Choice(name="이스라펠", value="1003"),
-    app_commands.Choice(name="진", value="2019"),
-    app_commands.Choice(name="트리니엘", value="2020"),
-    app_commands.Choice(name="카이시넬", value="2021"),
-]
-
 CONDITION_TYPE_CHOICES = [
     app_commands.Choice(name="템렙", value="item_level"),
     app_commands.Choice(name="아툴 점수", value="combat_score"),
 ]
-
-VALID_WEEKDAYS = {"월", "화", "수", "목", "금", "토", "일"}
-
 
 # ========================================================
 # 공통 유틸 함수
