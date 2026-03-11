@@ -3,19 +3,7 @@
 
 from __future__ import annotations
 
-
-def safe_int(value: Any, default: int = 0) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
-
-
-def safe_str(value: Any, default: str = "") -> str:
-    if value is None:
-        return default
-    text = str(value).strip()
-    return text if text else default
+from app_helpers import safe_int, safe_str
 
 
 def normalize_party_member_row(row: dict) -> dict:
