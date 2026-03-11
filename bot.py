@@ -24,6 +24,8 @@ from storage import (
     list_raid_applications_by_weekday,
     list_raid_parties,
     replace_raid_parties,
+    move_party_member_to_slot,
+    move_party_member_to_waiting,
 )
 
 from raid_logic import (
@@ -31,6 +33,11 @@ from raid_logic import (
     exclude_already_generated_characters,
     flatten_raids_to_party_rows,
     PartyConfirmVisibilityView,
+    find_matching_generated_members,
+    find_matching_generated_member,
+    can_move_member_to_target,
+    find_first_empty_slot,
+    find_replace_candidate_in_party,
 )
 
 from views import (
@@ -479,6 +486,55 @@ def format_party_check_text_for_weekday(
         waiting_members=waiting_members,
         source_note="공대 확인의 템렙/아툴 점수는 DB 저장 시점 기준입니다.",
     )
+
+# 공대 수정용
+def build_party_update_embed(
+    raid_name: str,
+    weekday: str,
+    moved_member: dict,
+    target_raid_no: int,
+    target_party_no: int,
+    target_slot_no: int,
+    replaced_member: dict | None = None,
+) -> discord.Embed:
+    embed = discord.Embed(
+        title=f"[{raid_name}] {weekday} 공대 수정 완료",
+        color=discord.Color.orange(),
+    )
+
+    embed.add_field(
+        name="이동 캐릭터",
+        value=(
+            f"{moved_member['character_name']} | "
+            f"{moved_member['race_name']} / {moved_member['server_name']} | "
+            f"{moved_member['job_name']} | "
+            f"{moved_member['item_level']} | "
+            f"{moved_member['combat_score']}"
+        ),
+        inline=False,
+    )
+
+    embed.add_field(
+        name="이동 위치",
+        value=f"{target_raid_no}공대 {target_party_no}파티 {target_slot_no}번 슬롯",
+        inline=False,
+    )
+
+    if replaced_member is not None:
+        embed.add_field(
+            name="대기 이동",
+            value=(
+                f"{replaced_member['character_name']} | "
+                f"{replaced_member['race_name']} / {replaced_member['server_name']} | "
+                f"{replaced_member['job_name']} | "
+                f"{replaced_member['item_level']} | "
+                f"{replaced_member['combat_score']}"
+            ),
+            inline=False,
+        )
+
+    embed.set_footer(text="※ 템렙/아툴 점수는 DB 저장값 기준입니다.")
+    return embed
 
 
 # ========================================================
@@ -2143,6 +2199,244 @@ async def reset_parties_command(
     except Exception as e:
         await interaction.followup.send(
             f"공대초기화 중 오류가 발생했습니다.\n`{e}`",
+            ephemeral=True,
+        )
+
+
+# ========================================================
+# /공대수정
+# ========================================================
+
+# 관리자만 사용 가능
+
+@bot.tree.command(name="공대수정", description="생성된 공대 내역에서 캐릭터를 이동합니다.")
+@app_commands.describe(
+    레이드이름="수정할 레이드 이름",
+    요일="수정할 요일",
+    캐릭터명="이동할 캐릭터명",
+    공대="이동할 공대 번호",
+    파티="이동할 파티 번호 (1 또는 2)",
+)
+async def update_party_member_command(
+    interaction: discord.Interaction,
+    레이드이름: str,
+    요일: str,
+    캐릭터명: str,
+    공대: int,
+    파티: int,
+):
+    if interaction.guild is None:
+        await interaction.response.send_message(
+            "서버 안에서만 사용할 수 있는 명령어입니다.",
+            ephemeral=True,
+        )
+        return
+
+    if not is_admin(interaction):
+        await interaction.response.send_message(
+            "관리자만 사용할 수 있는 명령어입니다.",
+            ephemeral=True,
+        )
+        return
+
+    raid_name = 레이드이름.strip()
+    weekday = 요일.strip()
+    character_name = 캐릭터명.strip()
+
+    if not raid_name:
+        await interaction.response.send_message(
+            "레이드 이름이 비어 있습니다.",
+            ephemeral=True,
+        )
+        return
+
+    if weekday not in VALID_WEEKDAYS:
+        await interaction.response.send_message(
+            "요일은 월, 화, 수, 목, 금, 토, 일 중 하나여야 합니다.",
+            ephemeral=True,
+        )
+        return
+
+    if not character_name:
+        await interaction.response.send_message(
+            "캐릭터명이 비어 있습니다.",
+            ephemeral=True,
+        )
+        return
+
+    if 공대 < 1:
+        await interaction.response.send_message(
+            "공대 번호는 1 이상이어야 합니다.",
+            ephemeral=True,
+        )
+        return
+
+    if 파티 not in (1, 2):
+        await interaction.response.send_message(
+            "파티 번호는 1 또는 2만 가능합니다.",
+            ephemeral=True,
+        )
+        return
+
+    await interaction.response.defer(ephemeral=True, thinking=True)
+
+    try:
+        raid = get_raid(interaction.guild.id, raid_name)
+        if raid is None:
+            await interaction.followup.send(
+                f"`{raid_name}` 레이드는 존재하지 않습니다.",
+                ephemeral=True,
+            )
+            return
+
+        rows = list_raid_parties(
+            guild_id=interaction.guild.id,
+            raid_name=raid_name,
+            weekday=weekday,
+        )
+
+        if not rows:
+            await interaction.followup.send(
+                f"`{raid_name}` 레이드의 `{weekday}` 공대 생성 내역이 없습니다.",
+                ephemeral=True,
+            )
+            return
+
+        # 1) 이동 대상 캐릭터 찾기
+        guild_setting = get_guild_setting(interaction.guild.id)
+        moving_member = None
+
+        if guild_setting is not None:
+            moving_member = find_matching_generated_member(
+                rows=rows,
+                race_code=str(guild_setting["race_code"]),
+                server_code=str(guild_setting["server_code"]),
+                character_name=character_name,
+            )
+        else:
+            matched = find_matching_generated_members(rows, character_name)
+
+            if not matched:
+                await interaction.followup.send(
+                    f"`{raid_name}` 레이드의 `{weekday}` 공대에서 `{character_name}` 캐릭터를 찾을 수 없습니다.",
+                    ephemeral=True,
+                )
+                return
+
+            if len(matched) == 1:
+                moving_member = matched[0]
+            else:
+                race_server_view = ApplicationRaceServerView(user_id=interaction.user.id)
+                await interaction.followup.send(
+                    f"`{character_name}` 이름의 캐릭터가 여러 종족/서버에 있습니다.\n"
+                    "이동할 캐릭터의 종족/서버를 선택하세요.",
+                    view=race_server_view,
+                    ephemeral=True,
+                )
+
+                timeout = await race_server_view.wait()
+                if timeout:
+                    await interaction.followup.send(
+                        "종족/서버 선택 시간이 초과되었습니다.",
+                        ephemeral=True,
+                    )
+                    return
+
+                if race_server_view.value != "submit":
+                    return
+
+                moving_member = find_matching_generated_member(
+                    rows=rows,
+                    race_code=str(race_server_view.selected_race_code),
+                    server_code=str(race_server_view.selected_server_code),
+                    character_name=character_name,
+                )
+
+        if moving_member is None:
+            await interaction.followup.send(
+                f"`{raid_name}` 레이드의 `{weekday}` 공대에서 `{character_name}` 캐릭터를 찾을 수 없습니다.",
+                ephemeral=True,
+            )
+            return
+
+        # 2) 이동 가능성 검사
+        can_move, reason = can_move_member_to_target(
+            rows=rows,
+            moving_member=moving_member,
+            target_raid_no=공대,
+            target_party_no=파티,
+        )
+
+        if not can_move:
+            await interaction.followup.send(
+                f"공대 이동 불가: {reason}",
+                ephemeral=True,
+            )
+            return
+
+        # 3) 목표 슬롯 결정
+        empty_slot = find_first_empty_slot(
+            rows=rows,
+            target_raid_no=공대,
+            target_party_no=파티,
+        )
+
+        replaced_member = None
+        target_slot_no = None
+
+        if empty_slot is not None:
+            target_slot_no = empty_slot
+        else:
+            replaced_member = find_replace_candidate_in_party(
+                rows=rows,
+                target_raid_no=공대,
+                target_party_no=파티,
+                exclude_row_id=int(moving_member["id"]),
+            )
+
+            if replaced_member is None:
+                await interaction.followup.send(
+                    "이동 대상 파티의 교체 대상을 찾을 수 없습니다.",
+                    ephemeral=True,
+                )
+                return
+
+            target_slot_no = int(replaced_member["slot_no"])
+
+        # 4) DB 갱신
+        if replaced_member is not None:
+            move_party_member_to_waiting(
+                party_row_id=int(replaced_member["id"]),
+                raid_no=공대,
+            )
+
+        move_party_member_to_slot(
+            party_row_id=int(moving_member["id"]),
+            raid_no=공대,
+            party_no=파티,
+            slot_no=target_slot_no,
+        )
+
+        # 5) 결과 표시
+        embed = build_party_update_embed(
+            raid_name=raid_name,
+            weekday=weekday,
+            moved_member=moving_member,
+            target_raid_no=공대,
+            target_party_no=파티,
+            target_slot_no=target_slot_no,
+            replaced_member=replaced_member,
+        )
+
+        await interaction.followup.send(embed=embed, ephemeral=False)
+        await interaction.followup.send(
+            "공대 수정이 저장되었습니다.",
+            ephemeral=True,
+        )
+
+    except Exception as e:
+        await interaction.followup.send(
+            f"공대수정 중 오류가 발생했습니다.\n`{e}`",
             ephemeral=True,
         )
 
