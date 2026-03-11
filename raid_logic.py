@@ -3,21 +3,8 @@ from __future__ import annotations
 
 from typing import Any
 
-
-# =========================
-# 직업 역할 매핑
-# =========================
-# 실제 게임 기준에 맞게 수정 가능
-JOB_ROLE_MAP: dict[str, set[str]] = {
-    "수호성": {"TANK"},
-    "검성": {"TANK", "DPS"},
-    "치유성": {"HEAL"},
-    "호법성": {"HEAL", "DPS"},
-    "궁성": {"DPS"},
-    "살성": {"DPS"},
-    "마도성": {"DPS"},
-    "정령성": {"DPS"},
-}
+from constants import JOB_ROLE_MAP
+from app_helpers import safe_int, safe_str
 
 
 # =========================
@@ -42,31 +29,6 @@ def normalize_application_row(row: dict) -> dict:
         "peak_combat_score": safe_int(row.get("peak_combat_score")),
         "available_days": list(row.get("available_days") or []),
         "note": safe_str(row.get("note"), ""),
-    }
-
-
-def normalize_party_member_row(row: dict) -> dict:
-    return {
-        "id": safe_int(row.get("id")),
-        "guild_id": safe_int(row.get("guild_id")),
-        "raid_name": safe_str(row.get("raid_name"), "-"),
-        "weekday": safe_str(row.get("weekday"), "-"),
-        "raid_no": safe_int(row.get("raid_no")),
-        "party_no": row.get("party_no"),
-        "slot_no": row.get("slot_no"),
-        "status": safe_str(row.get("status"), "-"),
-        "user_id": safe_int(row.get("user_id")),
-        "user_name": safe_str(row.get("user_name"), "-"),
-        "race_code": safe_str(row.get("race_code"), "-"),
-        "race_name": safe_str(row.get("race_name"), "-"),
-        "server_code": safe_str(row.get("server_code"), "-"),
-        "server_name": safe_str(row.get("server_name"), "-"),
-        "character_name": safe_str(row.get("character_name"), "-"),
-        "job_name": safe_str(row.get("job_name"), "알수없음"),
-        "item_level": safe_int(row.get("item_level")),
-        "combat_score": safe_int(row.get("combat_score")),
-        "note": safe_str(row.get("note"), ""),
-        "source_application_id": row.get("source_application_id"),
     }
 
 
@@ -528,84 +490,6 @@ def flatten_raids_to_party_rows(
                 "source_application_id": member.get("id"),
             }
         )
+    return rows
 
 
-# =========================
-# 공대수정용 보조 함수
-# =========================
-
-def list_members_in_raid_no(rows: list[dict], raid_no: int) -> list[dict]:
-    result: list[dict] = []
-    for row in rows:
-        member = normalize_party_member_row(row)
-        if safe_int(member.get("raid_no")) == safe_int(raid_no):
-            result.append(member)
-    return result
-
-
-def find_matching_generated_members(
-    rows: list[dict],
-    character_name: str,
-) -> list[dict]:
-    result: list[dict] = []
-    for row in rows:
-        member = normalize_party_member_row(row)
-        if safe_str(member.get("character_name")) == safe_str(character_name):
-            result.append(member)
-    return result
-
-
-def find_matching_generated_member(
-    rows: list[dict],
-    race_code: str,
-    server_code: str,
-    character_name: str,
-) -> dict | None:
-    for row in rows:
-        member = normalize_party_member_row(row)
-        if (
-            safe_str(member.get("race_code")) == safe_str(race_code)
-            and safe_str(member.get("server_code")) == safe_str(server_code)
-            and safe_str(member.get("character_name")) == safe_str(character_name)
-        ):
-            return member
-    return None
-
-
-def target_raid_has_other_same_user(
-    rows: list[dict],
-    target_raid_no: int,
-    moving_member: dict,
-) -> bool:
-    moving_row_id = safe_int(moving_member.get("id"))
-    moving_user_id = safe_int(moving_member.get("user_id"))
-
-    for row in rows:
-        member = normalize_party_member_row(row)
-        if safe_int(member.get("id")) == moving_row_id:
-            continue
-        if safe_int(member.get("raid_no")) != safe_int(target_raid_no):
-            continue
-        if safe_str(member.get("status")) != "ASSIGNED":
-            continue
-        if safe_int(member.get("user_id")) == moving_user_id:
-            return True
-    return False
-
-
-def can_move_member_to_target(
-    rows: list[dict],
-    moving_member: dict,
-    target_raid_no: int,
-    target_party_no: int,
-) -> tuple[bool, str]:
-    current_raid_no = safe_int(moving_member.get("raid_no"))
-    current_party_no = safe_int(moving_member.get("party_no") or 0)
-
-    if current_raid_no == safe_int(target_raid_no) and current_party_no == safe_int(target_party_no):
-        return False, "이미 해당 공대/파티에 배치되어 있습니다."
-
-    if target_raid_has_other_same_user(rows, target_raid_no, moving_member):
-        return False, "대상 공대에는 이미 같은 디스코드 계정의 다른 캐릭터가 있습니다."
-
-    return True, ""
