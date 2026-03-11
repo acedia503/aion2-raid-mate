@@ -10,8 +10,7 @@ from app_helpers import format_days, split_text_by_lines, send_long_text_followu
     
 # 신청 한 줄 포맷 함수
 def format_application_line(app: dict) -> str:
-    days = app.get("available_days") or []
-    days_text = ", ".join(days) if days else "-"
+    days_text = format_days(app.get("available_days") or [])
 
     note = (app.get("note") or "").strip()
     note_text = note if note else "-"
