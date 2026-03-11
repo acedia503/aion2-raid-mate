@@ -93,44 +93,6 @@ def get_server_name_by_code(server_code: str) -> str | None:
     return None
 
 
-
-
-
-
-# 레이드별 Embed 생성 함수
-def build_raid_application_embed(
-    raid_name: str,
-    applications: list[dict],
-) -> discord.Embed:
-
-    embed = discord.Embed(
-        title=f"[{raid_name}] 신청 내역",
-        color=discord.Color.blue(),
-    )
-
-    header = (
-        "캐릭터 | 종족/서버 | 직업 | 템렙 | 아툴 | 가능요일 | 특이사항"
-    )
-
-    separator = "-" * len(header)
-
-    lines = []
-
-    for app in applications:
-        lines.append(format_application_line(app))
-
-    body = "\n".join(lines) if lines else "-"
-
-    embed.description = (
-        "```"
-        f"{header}\n"
-        f"{separator}\n"
-        f"{body}"
-        "```"
-    )
-
-    return embed
-
 # 취소 완료 메시지용
 def build_cancel_result_text(application: dict) -> str:
     days = application.get("available_days") or []
