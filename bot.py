@@ -243,28 +243,6 @@ def convert_rows_to_raid_structure(rows: list[dict]) -> tuple[list[dict], list[d
     return raids, waiting_members
 
 
-def build_party_check_embed(
-    raid_name: str,
-    weekday: str | None,
-    raids: list[dict],
-    waiting_members: list[dict],
-) -> discord.Embed:
-    assigned_count = sum(len(raid.get("party1", [])) + len(raid.get("party2", [])) for raid in raids)
-    waiting_count = len(waiting_members)
-
-    title = f"[{raid_name}] 공대 확인" if weekday is None else f"[{raid_name}] {weekday} 공대 확인"
-
-    embed = discord.Embed(
-        title=title,
-        color=discord.Color.blurple(),
-    )
-    embed.add_field(name="생성 공대 수", value=str(len(raids)), inline=False)
-    embed.add_field(name="배정 인원", value=str(assigned_count), inline=False)
-    embed.add_field(name="대기 인원", value=str(waiting_count), inline=False)
-    embed.set_footer(text="※ 템렙/아툴 점수는 공대 생성 시점 기준입니다.")
-    return embed
-
-
 def format_party_check_text_for_weekday(
     raid_name: str,
     weekday: str,
