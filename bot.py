@@ -53,7 +53,7 @@ from views import (
     WeekdayMultiSelectView,
     ApplicationCancelView,
     ForceDeleteRaceServerView,
-    PartyRuleSetupView
+    PartyRuleSetupView,
     PartyReplaceModeView,
     PartyReplaceView,
 )
