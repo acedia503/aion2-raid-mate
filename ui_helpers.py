@@ -242,8 +242,37 @@ def format_party_check_text_for_weekday(
     )
 
 
-def build_application_update_embed(...):
-    ...
+# 수정완료 공개 메시지용
+def build_application_update_embed(
+    raid_name: str,
+    data: dict,
+    available_days: list[str],
+    note: str,
+    show_race_server: bool = True,
+) -> discord.Embed:
+    embed = discord.Embed(
+        title=f"[{raid_name}] 신청 수정 완료",
+        color=discord.Color.orange(),
+    )
+    embed.add_field(name="캐릭터명", value=data["nickname"], inline=False)
+
+    if show_race_server:
+        embed.add_field(
+            name="종족/종족서버",
+            value=f"{data['race_name']} / {data['server_name']}",
+            inline=False,
+        )
+
+    embed.add_field(name="직업", value=data["job_name"], inline=False)
+    embed.add_field(name="템렙", value=str(data["item_level"]), inline=False)
+    embed.add_field(name="아툴 점수", value=str(data["combat_score"]), inline=False)
+    embed.add_field(name="가능 요일", value=format_days(available_days), inline=False)
+
+    if note:
+        embed.add_field(name="특이사항", value=note, inline=False)
+
+    return embed
+
 
 def build_party_update_embed(...):
     ...
