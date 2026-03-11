@@ -274,8 +274,78 @@ def build_application_update_embed(
     return embed
 
 
-def build_party_update_embed(...):
-    ...
+# 공대 수정용
+def build_party_update_embed(
+    raid_name: str,
+    source_weekday: str,
+    moved_member: dict,
+    target_weekday: str,
+    target_raid_no: int | None,
+    target_party_no: int | None,
+    target_slot_no: int | None,
+    replaced_member: dict | None = None,
+    replace_mode: str | None = None,
+) -> discord.Embed:
+    embed = discord.Embed(
+        title=f"[{raid_name}] 공대 수정 완료",
+        color=discord.Color.orange(),
+    )
+
+    embed.add_field(
+        name="이동 캐릭터",
+        value=(
+            f"{moved_member['character_name']} | "
+            f"{moved_member['race_name']} / {moved_member['server_name']} | "
+            f"{moved_member['job_name']} | "
+            f"{moved_member['item_level']} | "
+            f"{moved_member['combat_score']}"
+        ),
+        inline=False,
+    )
+
+    source_position = (
+        "대기"
+        if str(moved_member.get("status")) == "WAITING"
+        else f"{source_weekday} / {moved_member.get('raid_no')}공대 {moved_member.get('party_no')}파티 {moved_member.get('slot_no')}번"
+    )
+    embed.add_field(name="기존 위치", value=source_position, inline=False)
+
+    if target_party_no is None or target_slot_no is None:
+        target_position = f"{target_weekday} / 대기"
+    else:
+        target_position = f"{target_weekday} / {target_raid_no}공대 {target_party_no}파티 {target_slot_no}번"
+
+    embed.add_field(name="이동 위치", value=target_position, inline=False)
+
+    if replaced_member is not None:
+        if replace_mode == "swap":
+            embed.add_field(
+                name="교체 캐릭터",
+                value=(
+                    f"{replaced_member['character_name']} | "
+                    f"{replaced_member['race_name']} / {replaced_member['server_name']} | "
+                    f"{replaced_member['job_name']} | "
+                    f"{replaced_member['item_level']} | "
+                    f"{replaced_member['combat_score']}"
+                ),
+                inline=False,
+            )
+        elif replace_mode == "waiting":
+            embed.add_field(
+                name="대기 이동 캐릭터",
+                value=(
+                    f"{replaced_member['character_name']} | "
+                    f"{replaced_member['race_name']} / {replaced_member['server_name']} | "
+                    f"{replaced_member['job_name']} | "
+                    f"{replaced_member['item_level']} | "
+                    f"{replaced_member['combat_score']}"
+                ),
+                inline=False,
+            )
+
+    embed.set_footer(text="※ 템렙/아툴 점수는 공대 생성 시 기준입니다.")
+    return embed
+
 
 def build_cancel_result_text(application: dict) -> str:
     ...
