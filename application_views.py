@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import discord
 
-from app_helpers import get_servers_for_race
+from app_helpers import get_servers_for_race, format_days
 from constants import RACE_OPTIONS, WEEKDAY_OPTIONS
 
 
@@ -237,7 +237,7 @@ class WeekdayMultiSelectView(discord.ui.View):
             item.disabled = True
 
     def build_summary_text(self, saved: bool = False, note_entered: bool = False) -> str:
-        days_text = ", ".join(self.selected_days) if self.selected_days else "-"
+        days_text = format_days(self.selected_days)
         note_text = self.note if self.note else "-"
 
         if saved:
