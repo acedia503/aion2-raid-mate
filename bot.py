@@ -1,3 +1,7 @@
+# bot.py
+# 디스코드 명령어 담당
+
+import os
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -6,8 +10,6 @@ from constants import VALID_WEEKDAYS, RACE_OPTIONS, SERVER_OPTIONS
 
 from app_helpers import (
     is_admin,
-    get_race_name_by_code,
-    get_server_name_by_code,
 )
 
 from settings_views import (
@@ -49,9 +51,8 @@ from party_helpers import (
     find_matching_generated_member,
     can_move_member_to_target,
     find_first_empty_slot,
-    find_replace_candidate_in_party,
     list_members_in_party,
-    convert_rows_to_raid_structure,
+    group_party_rows_by_weekday,
     convert_rows_to_raid_structure,
 )
 
@@ -130,39 +131,6 @@ def build_default_all_slot_rules() -> list[dict]:
     ]
 
 # Atool 재조회
-def refresh_candidate_with_atool(candidate: dict) -> dict:
-    """
-    applications의 신청 원본 데이터를 기반으로
-    공대 생성 시점 아툴 정보를 다시 조회해 최신값으로 덮어쓴다.
-    조회 실패 시 기존 DB 값 유지.
-    """
-    refreshed = dict(candidate)
-
-    try:
-        data = get_character_info(
-            race_code=str(candidate["race_code"]),
-            race_name=str(candidate["race_name"]),
-            server_code=str(candidate["server_code"]),
-            server_name=str(candidate["server_name"]),
-            character_name=str(candidate["character_name"]),
-        )
-
-        refreshed["character_name"] = data["nickname"]
-        refreshed["job_name"] = data["job_name"]
-        refreshed["item_level"] = data["item_level"]
-        refreshed["combat_score"] = data["combat_score"]
-        refreshed["peak_combat_score"] = data["peak_combat_score"]
-
-    except AtoolError:
-        # 재조회 실패 시 신청 DB 저장값 그대로 유지
-        pass
-    except Exception:
-        # 예기치 않은 오류도 생성 전체를 막지 않고 기존 값 유지
-        pass
-
-    return refreshed
-
-
 def refresh_candidates_for_party_generation(candidates: list[dict]) -> tuple[list[dict], list[str]]:
     """
     후보 전원을 공대 생성 시점 기준으로 재조회.
@@ -1626,7 +1594,7 @@ async def create_parties_command(
         )
 
         # 12) 결과 출력
-        source_note = "설정한 공대 규칙 기준 / 신청 DB 저장값 기준"
+        source_note = "설정한 공대 규칙 기준 / 공대 생성 시점 기준"
         embed = build_raid_result_embed(
             raid_name=raid_name,
             weekday=weekday,
@@ -2099,7 +2067,7 @@ async def update_party_member_command(
             )
             return
 
-                # 목표 파티 빈 슬롯 찾기
+        # 목표 파티 빈 슬롯 찾기
         empty_slot = find_first_empty_slot(
             rows=rows,
             target_raid_no=공대,
