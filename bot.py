@@ -162,32 +162,6 @@ def build_application_update_embed(
     return embed
 
 
-
-
-
-def build_raid_result_embed(
-    raid_name: str,
-    weekday: str,
-    raids: list[dict],
-    waiting_members: list[dict],
-    source_note: str | None = None,
-) -> discord.Embed:
-    assigned_count = sum(len(raid.get("party1", [])) + len(raid.get("party2", [])) for raid in raids)
-    waiting_count = len(waiting_members)
-
-    embed = discord.Embed(
-        title=f"[{raid_name}] {weekday} 공대 생성 결과",
-        color=discord.Color.green(),
-    )
-    embed.add_field(name="생성 공대 수", value=str(len(raids)), inline=False)
-    embed.add_field(name="배정 인원", value=str(assigned_count), inline=False)
-    embed.add_field(name="대기 인원", value=str(waiting_count), inline=False)
-
-    if source_note:
-        embed.set_footer(text=source_note)
-
-    return embed
-
 # 기본 슬롯 규칙 함수
 def build_default_all_slot_rules() -> list[dict]:
     return [
