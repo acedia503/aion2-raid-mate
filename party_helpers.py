@@ -17,23 +17,51 @@ def list_members_in_party(rows: list[dict], raid_no: int, party_no: int) -> list
             result.append(member)
     result.sort(key=lambda x: safe_int(x.get("slot_no")))
     return result
-  
-get_party_size
 
+
+def get_party_size(rows, raid_no, party_no):
+    return len(list_members_in_party(rows, raid_no, party_no))
+    
 
 # =========================================================
 #  2. 슬롯 관
 # =========================================================
 
-find_first_empty_slot
-get_party_slot_member
+def find_first_empty_slot(rows, raid_no, party_no):
+    used = {
+        r["slot_no"]
+        for r in rows
+        if r["raid_no"] == raid_no
+        and r["party_no"] == party_no
+    }
+
+    for i in range(1, 5):
+        if i not in used:
+            return i
+
+    return None
+
+
+def get_party_slot_member(rows, raid_no, party_no, slot_no):
+    for r in rows:
+        if (
+            r["raid_no"] == raid_no
+            and r["party_no"] == party_no
+            and r["slot_no"] == slot_no
+        ):
+            return r
+    return None
 
 
 # =========================================================
 # 3. 캐릭터 위치 찾
 # =========================================================
 
-find_member_in_saved_parties
+def find_member_in_saved_parties(rows, character_name):
+    for r in rows:
+        if r["character_name"] == character_name:
+            return r
+    return None
 
 
 # =========================================================
