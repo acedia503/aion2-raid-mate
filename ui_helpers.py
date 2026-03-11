@@ -31,7 +31,7 @@ def split_text_by_lines(text: str, limit: int = 1800) -> list[str]:
 
     return chunks if chunks else ["-"]
 
-
+# 긴 코드블록 전
 async def send_long_text_followup(
     interaction: discord.Interaction,
     text: str,
