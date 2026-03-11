@@ -1,9 +1,17 @@
 # party_views.py
 # 공대 관련 UI
 
+from __future__ import annotations
+
+import discord
+
+from constants import ROLE_OPTIONS, ROLE_JOB_OPTIONS
+
+
 # =========================================================
 # 공대 확인 UI
 # =========================================================
+
 class PartyConfirmVisibilityView(discord.ui.View):
     def __init__(self, user_id: int):
         super().__init__(timeout=120)
@@ -91,6 +99,7 @@ class PartyRuleSetupView(discord.ui.View):
                     "preferred_jobs": list(rule.get("preferred_jobs", [])),
                 }
 
+        self._dynamic_items: list[discord.ui.Item] = []
         self.refresh_components()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -118,34 +127,35 @@ class PartyRuleSetupView(discord.ui.View):
         for slot_index in range(1, 5):
             rule = self.slot_rules[slot_index]
             jobs = ", ".join(rule["preferred_jobs"]) if rule["preferred_jobs"] else "-"
-            lines.append(
-                f"  {slot_index}번 | {rule['role_type']} | 선호 직업: {jobs}"
-            )
+            lines.append(f"  {slot_index}번 | {rule['role_type']} | 선호 직업: {jobs}")
 
         lines.append("")
         lines.append("2파티")
         for slot_index in range(5, 9):
             rule = self.slot_rules[slot_index]
             jobs = ", ".join(rule["preferred_jobs"]) if rule["preferred_jobs"] else "-"
-            lines.append(
-                f"  {slot_index - 4}번 | {rule['role_type']} | 선호 직업: {jobs}"
-            )
+            lines.append(f"  {slot_index - 4}번 | {rule['role_type']} | 선호 직업: {jobs}")
 
         lines.append("")
         lines.append(f"현재 페이지: {self.page}/2")
         return "\n".join(lines)
 
     def refresh_components(self) -> None:
-        self.clear_items()
+        # 동적 셀렉트만 제거
+        for item in self._dynamic_items:
+            self.remove_item(item)
+        self._dynamic_items.clear()
 
+        # 현재 페이지 슬롯에 대한 동적 셀렉트 추가
         for slot_index in self.current_slot_range():
-            self.add_item(PartyRuleRoleSelect(self, slot_index))
-            self.add_item(PartyRuleJobSelect(self, slot_index))
+            role_select = PartyRuleRoleSelect(self, slot_index)
+            job_select = PartyRuleJobSelect(self, slot_index)
 
-        self.add_item(self.prev_button)
-        self.add_item(self.next_button)
-        self.add_item(self.save_button)
-        self.add_item(self.cancel_button)
+            self.add_item(role_select)
+            self.add_item(job_select)
+
+            self._dynamic_items.append(role_select)
+            self._dynamic_items.append(job_select)
 
     def export_rules(self) -> list[dict]:
         return [
@@ -216,38 +226,34 @@ class PartyRuleRoleSelect(discord.ui.Select):
 
         current_role = parent_view.slot_rules[slot_index]["role_type"]
 
-        options = []
+        options: list[discord.SelectOption] = []
         for option in ROLE_OPTIONS:
             options.append(
                 discord.SelectOption(
-                    label=option.label,
-                    value=option.value,
-                    default=(option.value == current_role),
+                    label=option["label"],
+                    value=option["value"],
+                    default=(option["value"] == current_role),
                 )
             )
 
         party_no = 1 if slot_index <= 4 else 2
         slot_no = slot_index if slot_index <= 4 else slot_index - 4
+        row_index = (slot_index - 1) % 4
 
         super().__init__(
             placeholder=f"{party_no}파티 {slot_no}번 역할 선택",
             min_values=1,
             max_values=1,
             options=options,
-            row=(slot_index - 1) % 5,
+            row=row_index,
         )
 
     async def callback(self, interaction: discord.Interaction):
-        if interaction.user.id != self.parent_view.user_id:
-            await interaction.response.send_message(
-                "이 UI는 명령어를 실행한 관리자만 사용할 수 있습니다.",
-                ephemeral=True,
-            )
-            return
-
         selected_role = self.values[0]
         self.parent_view.slot_rules[self.slot_index]["role_type"] = selected_role
         self.parent_view.slot_rules[self.slot_index]["preferred_jobs"] = []
+
+        self.parent_view.refresh_components()
 
         await interaction.response.edit_message(
             content=self.parent_view.build_summary_text(),
@@ -267,35 +273,29 @@ class PartyRuleJobSelect(discord.ui.Select):
         current_role = parent_view.slot_rules[slot_index]["role_type"]
         current_jobs = set(parent_view.slot_rules[slot_index]["preferred_jobs"])
 
-        options = []
-        for option in ROLE_JOB_OPTIONS.get(current_role, []):
+        options: list[discord.SelectOption] = []
+        for job_name in ROLE_JOB_OPTIONS.get(current_role, []):
             options.append(
                 discord.SelectOption(
-                    label=option.label,
-                    value=option.value,
-                    default=(option.value in current_jobs),
+                    label=job_name,
+                    value=job_name,
+                    default=(job_name in current_jobs),
                 )
             )
 
         party_no = 1 if slot_index <= 4 else 2
         slot_no = slot_index if slot_index <= 4 else slot_index - 4
+        row_index = (slot_index - 1) % 4
 
         super().__init__(
             placeholder=f"{party_no}파티 {slot_no}번 선호 직업 선택",
             min_values=0,
             max_values=max(1, len(options)),
             options=options[:25],
-            row=((slot_index - 1) % 5),
+            row=row_index,
         )
 
     async def callback(self, interaction: discord.Interaction):
-        if interaction.user.id != self.parent_view.user_id:
-            await interaction.response.send_message(
-                "이 UI는 명령어를 실행한 관리자만 사용할 수 있습니다.",
-                ephemeral=True,
-            )
-            return
-
         self.parent_view.slot_rules[self.slot_index]["preferred_jobs"] = list(self.values)
 
         await interaction.response.edit_message(
@@ -305,8 +305,43 @@ class PartyRuleJobSelect(discord.ui.Select):
 
 
 # =========================================================
-# 공대 수정
+# 공대 수정 - 대상 선택 UI
 # =========================================================
+
+class PartyReplaceSelect(discord.ui.Select):
+    def __init__(self, parent_view: "PartyReplaceView", members: list[dict]):
+        self.parent_view = parent_view
+
+        options: list[discord.SelectOption] = []
+        for member in members:
+            options.append(
+                discord.SelectOption(
+                    label=f"{member['character_name']} ({member['job_name']})"[:100],
+                    description=f"{member['item_level']} | {member['combat_score']}"[:100],
+                    value=str(member["id"]),
+                )
+            )
+
+        super().__init__(
+            placeholder="대상 파티에서 선택하세요",
+            min_values=1,
+            max_values=1,
+            options=options[:25],
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        self.parent_view.selected_member_id = int(self.values[0])
+        self.parent_view.value = "submit"
+
+        for item in self.parent_view.children:
+            item.disabled = True
+
+        await interaction.response.edit_message(
+            content="대상 캐릭터를 선택했습니다.",
+            view=self.parent_view,
+        )
+        self.parent_view.stop()
+
 
 class PartyReplaceView(discord.ui.View):
     def __init__(self, user_id: int, members: list[dict]):
@@ -330,55 +365,9 @@ class PartyReplaceView(discord.ui.View):
         for item in self.children:
             item.disabled = True
 
-      
-# =========================================================
-# 교체 대상 선택 UI
-# =========================================================
-
-class PartyReplaceSelect(discord.ui.Select):
-    def __init__(self, parent_view: "PartyReplaceView", members: list[dict]):
-        self.parent_view = parent_view
-
-        options = []
-        for m in members:
-            options.append(
-                discord.SelectOption(
-                    label=f"{m['character_name']} ({m['job_name']})"[:100],
-                    description=f"{m['item_level']} | {m['combat_score']}"[:100],
-                    value=str(m["id"]),
-                )
-            )
-
-        super().__init__(
-            placeholder="대상 파티에서 선택하세요",
-            min_values=1,
-            max_values=1,
-            options=options[:25],
-        )
-
-    async def callback(self, interaction: discord.Interaction):
-        if interaction.user.id != self.parent_view.user_id:
-            await interaction.response.send_message(
-                "이 UI는 명령어 실행자만 사용할 수 있습니다.",
-                ephemeral=True,
-            )
-            return
-
-        self.parent_view.selected_member_id = int(self.values[0])
-        self.parent_view.value = "submit"
-
-        for item in self.parent_view.children:
-            item.disabled = True
-
-        await interaction.response.edit_message(
-            content="대상 캐릭터를 선택했습니다.",
-            view=self.parent_view,
-        )
-        self.parent_view.stop()
-
 
 # =========================================================
-# 공대 수정 view
+# 공대 수정 - 처리 방식 선택 UI
 # =========================================================
 
 class PartyReplaceModeView(discord.ui.View):
