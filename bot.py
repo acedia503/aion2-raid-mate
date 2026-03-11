@@ -94,17 +94,7 @@ def get_server_name_by_code(server_code: str) -> str | None:
 
 
 
-# 레이드별 신청내역 그룹화
-def group_applications_by_raid(applications: list[dict]) -> dict[str, list[dict]]:
-    result: dict[str, list[dict]] = {}
 
-    for app in applications:
-        raid_name = app["raid_name"]
-        if raid_name not in result:
-            result[raid_name] = []
-        result[raid_name].append(app)
-
-    return result
 
 
 # 레이드별 Embed 생성 함수
