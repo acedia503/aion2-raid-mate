@@ -215,3 +215,70 @@ def list_members_in_raid_no(rows: list[dict], raid_no: int) -> list[dict]:
         if safe_int(member.get("raid_no")) == safe_int(raid_no):
             result.append(member)
     return result
+
+
+def group_party_rows_by_weekday(rows: list[dict]) -> dict[str, list[dict]]:
+    result: dict[str, list[dict]] = {}
+    for row in rows:
+        weekday = str(row.get("weekday", "-")).strip()
+        if weekday not in result:
+            result[weekday] = []
+        result[weekday].append(row)
+    return result
+
+
+def convert_rows_to_raid_structure(rows: list[dict]) -> tuple[list[dict], list[dict]]:
+    raid_map: dict[int, dict] = {}
+    waiting_members: list[dict] = []
+
+    for row in rows:
+        status = str(row.get("status", "")).strip()
+
+        member = {
+            "id": row.get("id"),
+            "user_id": row.get("user_id"),
+            "user_name": row.get("user_name"),
+            "race_code": row.get("race_code"),
+            "race_name": row.get("race_name"),
+            "server_code": row.get("server_code"),
+            "server_name": row.get("server_name"),
+            "character_name": row.get("character_name"),
+            "job_name": row.get("job_name"),
+            "item_level": row.get("item_level"),
+            "combat_score": row.get("combat_score"),
+            "note": row.get("note"),
+            "source_application_id": row.get("source_application_id"),
+        }
+
+        if status == "WAITING":
+            waiting_members.append(member)
+            continue
+
+        raid_no = int(row.get("raid_no", 0))
+        party_no = int(row.get("party_no", 0))
+        slot_no = int(row.get("slot_no", 0))
+
+        if raid_no not in raid_map:
+            raid_map[raid_no] = {
+                "raid_no": raid_no,
+                "party1": [],
+                "party2": [],
+            }
+
+        raid = raid_map[raid_no]
+        party_key = "party1" if party_no == 1 else "party2"
+        party = raid[party_key]
+
+        while len(party) < slot_no:
+            party.append({})
+
+        party[slot_no - 1] = member
+
+    raids = []
+    for raid_no in sorted(raid_map.keys()):
+        raid = raid_map[raid_no]
+        raid["party1"] = [m for m in raid["party1"] if m]
+        raid["party2"] = [m for m in raid["party2"] if m]
+        raids.append(raid)
+
+    return raids, waiting_members
