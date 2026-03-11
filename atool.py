@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 import requests
-
+from app_helpers import safe_int
 
 ATOOL_SEARCH_URL = "https://www.aion2tool.com/api/character/search"
 
@@ -25,13 +25,6 @@ DEFAULT_HEADERS = {
 
 class AtoolError(Exception):
     """아툴 조회 실패용 예외"""
-
-
-def safe_int(value: Any, default: int = 0) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
 
 
 def normalize_character_payload(
@@ -133,6 +126,9 @@ def get_character_info(
             timeout=timeout,
         )
         response.raise_for_status()
+    except requests.HTTPError as e:
+        status_code = e.response.status_code if e.response is not None else "unknown"
+        raise AtoolError(f"아툴 요청 실패 (HTTP {status_code})") from e
     except requests.RequestException as e:
         raise AtoolError(f"아툴 요청 실패: {e}") from e
 
