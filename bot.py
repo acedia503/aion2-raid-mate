@@ -51,6 +51,8 @@ from party_helpers import (
     find_first_empty_slot,
     find_replace_candidate_in_party,
     list_members_in_party,
+    convert_rows_to_raid_structure,
+    convert_rows_to_raid_structure,
 )
 
 from raid_logic import (
@@ -128,7 +130,6 @@ def build_default_all_slot_rules() -> list[dict]:
     ]
 
 # Atool 재조회
-
 def refresh_candidate_with_atool(candidate: dict) -> dict:
     """
     applications의 신청 원본 데이터를 기반으로
@@ -1783,7 +1784,7 @@ async def check_parties_command(
         summary_embed.add_field(name="전체 저장 행 수", value=str(all_rows_count), inline=False)
         summary_embed.add_field(name="전체 배정 인원", value=str(total_assigned), inline=False)
         summary_embed.add_field(name="전체 대기 인원", value=str(total_waiting), inline=False)
-        summary_embed.set_footer(text="※ 템렙/아툴 점수는 DB 저장 시점 기준입니다.")
+        summary_embed.set_footer(text="※ 템렙/아툴 점수는 공대 생성 시점 기준입니다.")
 
         await interaction.followup.send(embed=summary_embed, ephemeral=result_ephemeral)
 
@@ -2237,21 +2238,8 @@ async def update_party_member_command(
                     status="ASSIGNED",
                 )
 
-        # 4) DB 갱신
-        if replaced_member is not None:
-            move_party_member_to_waiting(
-                party_row_id=int(replaced_member["id"]),
-                raid_no=공대,
-            )
 
-        move_party_member_to_slot(
-            party_row_id=int(moving_member["id"]),
-            raid_no=공대,
-            party_no=파티,
-            slot_no=target_slot_no,
-        )
-
-        # 5) 결과 표시
+        # 4) 결과 표시
         embed = build_party_update_embed(
             raid_name=raid_name,
             source_weekday=source_weekday,
