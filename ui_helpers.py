@@ -46,8 +46,24 @@ async def send_long_text_followup(
         )
 
     
+# 신청 한 줄 포맷 함수
 def format_application_line(app: dict) -> str:
-    ...
+    days = app.get("available_days") or []
+    days_text = ", ".join(days) if days else "-"
+
+    note = (app.get("note") or "").strip()
+    note_text = note if note else "-"
+
+    return (
+        f"{app['character_name']} | "
+        f"{app['race_name']} / {app['server_name']} | "
+        f"{app['job_name']} | "
+        f"{app['item_level']} | "
+        f"{app['combat_score']} | "
+        f"{days_text} | "
+        f"{note_text}"
+    )
+
 
 def group_applications_by_raid(applications: list[dict]) -> dict[str, list[dict]]:
     ...
