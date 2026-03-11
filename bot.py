@@ -29,6 +29,8 @@ from storage import (
     load_party_rules,
     save_party_rules,
     has_party_rules,
+    update_party_member_position,
+    swap_party_members_position,
 )
 
 from raid_logic import (
@@ -41,6 +43,7 @@ from raid_logic import (
     can_move_member_to_target,
     find_first_empty_slot,
     find_replace_candidate_in_party,
+    list_members_in_party,
 )
 
 from views import (
@@ -51,6 +54,8 @@ from views import (
     ApplicationCancelView,
     ForceDeleteRaceServerView,
     PartyRuleSetupView
+    PartyReplaceModeView,
+    PartyReplaceView,
 )
 
 from atool import get_character_info, AtoolError
@@ -494,15 +499,17 @@ def format_party_check_text_for_weekday(
 # 공대 수정용
 def build_party_update_embed(
     raid_name: str,
-    weekday: str,
+    source_weekday: str,
     moved_member: dict,
-    target_raid_no: int,
-    target_party_no: int,
-    target_slot_no: int,
+    target_weekday: str,
+    target_raid_no: int | None,
+    target_party_no: int | None,
+    target_slot_no: int | None,
     replaced_member: dict | None = None,
+    replace_mode: str | None = None,
 ) -> discord.Embed:
     embed = discord.Embed(
-        title=f"[{raid_name}] {weekday} 공대 수정 완료",
+        title=f"[{raid_name}] 공대 수정 완료",
         color=discord.Color.orange(),
     )
 
@@ -518,26 +525,47 @@ def build_party_update_embed(
         inline=False,
     )
 
-    embed.add_field(
-        name="이동 위치",
-        value=f"{target_raid_no}공대 {target_party_no}파티 {target_slot_no}번 슬롯",
-        inline=False,
+    source_position = (
+        "대기"
+        if str(moved_member.get("status")) == "WAITING"
+        else f"{source_weekday} / {moved_member.get('raid_no')}공대 {moved_member.get('party_no')}파티 {moved_member.get('slot_no')}번"
     )
+    embed.add_field(name="기존 위치", value=source_position, inline=False)
+
+    if target_party_no is None or target_slot_no is None:
+        target_position = f"{target_weekday} / 대기"
+    else:
+        target_position = f"{target_weekday} / {target_raid_no}공대 {target_party_no}파티 {target_slot_no}번"
+
+    embed.add_field(name="이동 위치", value=target_position, inline=False)
 
     if replaced_member is not None:
-        embed.add_field(
-            name="대기 이동",
-            value=(
-                f"{replaced_member['character_name']} | "
-                f"{replaced_member['race_name']} / {replaced_member['server_name']} | "
-                f"{replaced_member['job_name']} | "
-                f"{replaced_member['item_level']} | "
-                f"{replaced_member['combat_score']}"
-            ),
-            inline=False,
-        )
+        if replace_mode == "swap":
+            embed.add_field(
+                name="교체 캐릭터",
+                value=(
+                    f"{replaced_member['character_name']} | "
+                    f"{replaced_member['race_name']} / {replaced_member['server_name']} | "
+                    f"{replaced_member['job_name']} | "
+                    f"{replaced_member['item_level']} | "
+                    f"{replaced_member['combat_score']}"
+                ),
+                inline=False,
+            )
+        elif replace_mode == "waiting":
+            embed.add_field(
+                name="대기 이동 캐릭터",
+                value=(
+                    f"{replaced_member['character_name']} | "
+                    f"{replaced_member['race_name']} / {replaced_member['server_name']} | "
+                    f"{replaced_member['job_name']} | "
+                    f"{replaced_member['item_level']} | "
+                    f"{replaced_member['combat_score']}"
+                ),
+                inline=False,
+            )
 
-    embed.set_footer(text="※ 템렙/아툴 점수는 공대 생성 시점 기준입니다.")
+    embed.set_footer(text="※ 템렙/아툴 점수는 공대 생성 시 기준입니다.")
     return embed
 
 
@@ -2512,7 +2540,7 @@ async def update_party_member_command(
             )
             return
 
-        # 3) 목표 슬롯 결정
+                # 목표 파티 빈 슬롯 찾기
         empty_slot = find_first_empty_slot(
             rows=rows,
             target_raid_no=공대,
@@ -2520,26 +2548,136 @@ async def update_party_member_command(
         )
 
         replaced_member = None
+        replace_mode = None
         target_slot_no = None
 
+        source_weekday = str(moving_member["weekday"])
+        source_raid_no = int(moving_member["raid_no"])
+        source_party_no = moving_member.get("party_no")
+        source_slot_no = moving_member.get("slot_no")
+        source_status = str(moving_member["status"])
+
+        # 1) 빈 슬롯 있으면 바로 이동
         if empty_slot is not None:
             target_slot_no = empty_slot
-        else:
-            replaced_member = find_replace_candidate_in_party(
-                rows=rows,
-                target_raid_no=공대,
-                target_party_no=파티,
-                exclude_row_id=int(moving_member["id"]),
+
+            update_party_member_position(
+                party_row_id=int(moving_member["id"]),
+                weekday=weekday,
+                raid_no=공대,
+                party_no=파티,
+                slot_no=target_slot_no,
+                status="ASSIGNED",
             )
+
+        # 2) 파티가 가득 차면 처리 방식 선택
+        else:
+            mode_view = PartyReplaceModeView(user_id=interaction.user.id)
+            await interaction.followup.send(
+                "대상 파티가 가득 찼습니다. 처리 방식을 선택하세요.",
+                view=mode_view,
+                ephemeral=True,
+            )
+
+            timeout = await mode_view.wait()
+            if timeout:
+                await interaction.followup.send(
+                    "처리 방식 선택 시간이 초과되었습니다.",
+                    ephemeral=True,
+                )
+                return
+
+            if mode_view.value in (None, "cancel"):
+                return
+
+            replace_mode = mode_view.value
+
+            party_members = list_members_in_party(
+                rows=rows,
+                raid_no=공대,
+                party_no=파티,
+            )
+
+            replace_view = PartyReplaceView(
+                user_id=interaction.user.id,
+                members=party_members,
+            )
+
+            if replace_mode == "swap":
+                await interaction.followup.send(
+                    "교체할 캐릭터를 선택하세요.",
+                    view=replace_view,
+                    ephemeral=True,
+                )
+            else:
+                await interaction.followup.send(
+                    "대기 인원으로 이동시킬 캐릭터를 선택하세요.",
+                    view=replace_view,
+                    ephemeral=True,
+                )
+
+            timeout = await replace_view.wait()
+            if timeout:
+                await interaction.followup.send(
+                    "대상 캐릭터 선택 시간이 초과되었습니다.",
+                    ephemeral=True,
+                )
+                return
+
+            if replace_view.value != "submit" or replace_view.selected_member_id is None:
+                return
+
+            selected_id = int(replace_view.selected_member_id)
+            for m in party_members:
+                if int(m["id"]) == selected_id:
+                    replaced_member = m
+                    break
 
             if replaced_member is None:
                 await interaction.followup.send(
-                    "이동 대상 파티의 교체 대상을 찾을 수 없습니다.",
+                    "선택한 교체 대상을 찾을 수 없습니다.",
                     ephemeral=True,
                 )
                 return
 
             target_slot_no = int(replaced_member["slot_no"])
+
+            # 2-1) swap
+            if replace_mode == "swap":
+                swap_party_members_position(
+                    first_row_id=int(moving_member["id"]),
+                    first_weekday=source_weekday,
+                    first_raid_no=source_raid_no,
+                    first_party_no=source_party_no,
+                    first_slot_no=source_slot_no,
+                    first_status=source_status,
+                    second_row_id=int(replaced_member["id"]),
+                    second_weekday=weekday,
+                    second_raid_no=공대,
+                    second_party_no=파티,
+                    second_slot_no=target_slot_no,
+                    second_status="ASSIGNED",
+                )
+
+            # 2-2) 대기 이동
+            elif replace_mode == "waiting":
+                update_party_member_position(
+                    party_row_id=int(replaced_member["id"]),
+                    weekday=weekday,
+                    raid_no=공대,
+                    party_no=None,
+                    slot_no=None,
+                    status="WAITING",
+                )
+
+                update_party_member_position(
+                    party_row_id=int(moving_member["id"]),
+                    weekday=weekday,
+                    raid_no=공대,
+                    party_no=파티,
+                    slot_no=target_slot_no,
+                    status="ASSIGNED",
+                )
 
         # 4) DB 갱신
         if replaced_member is not None:
@@ -2558,12 +2696,14 @@ async def update_party_member_command(
         # 5) 결과 표시
         embed = build_party_update_embed(
             raid_name=raid_name,
-            weekday=weekday,
+            source_weekday=source_weekday,
             moved_member=moving_member,
-            target_raid_no=공대,
-            target_party_no=파티,
+            target_weekday=weekday,
+            target_raid_no=공대 if replace_mode != "waiting" or target_slot_no is not None else None,
+            target_party_no=파티 if target_slot_no is not None else None,
             target_slot_no=target_slot_no,
             replaced_member=replaced_member,
+            replace_mode=replace_mode,
         )
 
         await interaction.followup.send(embed=embed, ephemeral=False)
