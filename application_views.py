@@ -1,6 +1,13 @@
 # application_views.py
 # 신청 관련 UI
 
+from __future__ import annotations
+
+import discord
+
+from app_helpers import get_servers_for_race
+from constants import RACE_OPTIONS
+
 
 # =========================================================
 # 종족/서버 선택
