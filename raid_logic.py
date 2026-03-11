@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from constants import JOB_ROLE_MAP
 from app_helpers import safe_int, safe_str
+from constants import JOB_ROLE_MAP
 
 
 # =========================
