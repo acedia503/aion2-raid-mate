@@ -7,8 +7,44 @@ import discord
 def format_days(days: list[str]) -> str:
     return ", ".join(days) if days else "-"
 
+# 긴 메시지 분할
 def split_text_by_lines(text: str, limit: int = 1800) -> list[str]:
-    ...
+    if not text:
+        return ["-"]
+
+    lines = text.splitlines()
+    chunks: list[str] = []
+    current = ""
+
+    for line in lines:
+        next_text = line if not current else f"{current}\n{line}"
+        if len(next_text) <= limit:
+            current = next_text
+            continue
+
+        if current:
+            chunks.append(current)
+        current = line
+
+    if current:
+        chunks.append(current)
+
+    return chunks if chunks else ["-"]
+
+
+async def send_long_text_followup(
+    interaction: discord.Interaction,
+    text: str,
+    ephemeral: bool = False,
+    limit: int = 1800,
+):
+    chunks = split_text_by_lines(text, limit=limit)
+    for chunk in chunks:
+        await interaction.followup.send(
+            f"```text\n{chunk}\n```",
+            ephemeral=ephemeral,
+        )
+
     
 def format_application_line(app: dict) -> str:
     ...
