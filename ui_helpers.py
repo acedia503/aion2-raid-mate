@@ -226,6 +226,22 @@ def build_party_check_embed(
     embed.set_footer(text="※ 템렙/아툴 점수는 공대 생성 시점 기준입니다.")
     return embed
 
+
+def format_party_check_text_for_weekday(
+    raid_name: str,
+    weekday: str,
+    raids: list[dict],
+    waiting_members: list[dict],
+) -> str:
+    return format_raid_result_text(
+        raid_name=raid_name,
+        weekday=weekday,
+        raids=raids,
+        waiting_members=waiting_members,
+        source_note="공대 확인의 템렙/아툴 점수는 공대 생성 시점 기준입니다.",
+    )
+
+
 def build_application_update_embed(...):
     ...
 
