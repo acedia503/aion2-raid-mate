@@ -1094,3 +1094,128 @@ class PartyRuleSetupView(discord.ui.View):
             view=self,
         )
         self.stop()
+
+# =========================================================
+# 공대 수정 view
+# =========================================================
+
+class PartyReplaceModeView(discord.ui.View):
+    def __init__(self, user_id: int):
+        super().__init__(timeout=120)
+        self.user_id = user_id
+        self.value: str | None = None
+        # "swap" / "waiting" / "cancel"
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(
+                "이 UI는 명령어를 실행한 관리자만 사용할 수 있습니다.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    async def on_timeout(self) -> None:
+        for item in self.children:
+            item.disabled = True
+
+    @discord.ui.button(label="교체", style=discord.ButtonStyle.primary)
+    async def swap_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.value = "swap"
+        for item in self.children:
+            item.disabled = True
+
+        await interaction.response.edit_message(
+            content="교체 모드를 선택했습니다.",
+            view=self,
+        )
+        self.stop()
+
+    @discord.ui.button(label="대기 이동", style=discord.ButtonStyle.secondary)
+    async def waiting_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.value = "waiting"
+        for item in self.children:
+            item.disabled = True
+
+        await interaction.response.edit_message(
+            content="대기 이동 모드를 선택했습니다.",
+            view=self,
+        )
+        self.stop()
+
+    @discord.ui.button(label="취소", style=discord.ButtonStyle.danger)
+    async def cancel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.value = "cancel"
+        for item in self.children:
+            item.disabled = True
+
+        await interaction.response.edit_message(
+            content="공대 수정이 취소되었습니다.",
+            view=self,
+        )
+        self.stop()
+
+# 교체 대상 선택 UI
+class PartyReplaceSelect(discord.ui.Select):
+    def __init__(self, parent_view: "PartyReplaceView", members: list[dict]):
+        self.parent_view = parent_view
+
+        options = []
+        for m in members:
+            options.append(
+                discord.SelectOption(
+                    label=f"{m['character_name']} ({m['job_name']})"[:100],
+                    description=f"{m['item_level']} | {m['combat_score']}"[:100],
+                    value=str(m["id"]),
+                )
+            )
+
+        super().__init__(
+            placeholder="대상 파티에서 선택하세요",
+            min_values=1,
+            max_values=1,
+            options=options[:25],
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.parent_view.user_id:
+            await interaction.response.send_message(
+                "이 UI는 명령어 실행자만 사용할 수 있습니다.",
+                ephemeral=True,
+            )
+            return
+
+        self.parent_view.selected_member_id = int(self.values[0])
+        self.parent_view.value = "submit"
+
+        for item in self.parent_view.children:
+            item.disabled = True
+
+        await interaction.response.edit_message(
+            content="대상 캐릭터를 선택했습니다.",
+            view=self.parent_view,
+        )
+        self.parent_view.stop()
+
+
+class PartyReplaceView(discord.ui.View):
+    def __init__(self, user_id: int, members: list[dict]):
+        super().__init__(timeout=120)
+        self.user_id = user_id
+        self.value: str | None = None
+        self.selected_member_id: int | None = None
+
+        self.add_item(PartyReplaceSelect(self, members))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(
+                "이 UI는 명령어 실행자만 사용할 수 있습니다.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    async def on_timeout(self) -> None:
+        for item in self.children:
+            item.disabled = True
