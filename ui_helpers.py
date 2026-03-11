@@ -2,10 +2,11 @@
 # 보여주기 위한 출력용 함수
 
 from __future__ import annotations
+
 import discord
 
-def format_days(days: list[str]) -> str:
-    return ", ".join(days) if days else "-"
+from app_helpers import format_days
+
 
 # 긴 메시지 분할
 def split_text_by_lines(text: str, limit: int = 1800) -> list[str]:
