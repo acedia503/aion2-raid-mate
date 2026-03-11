@@ -9,40 +9,6 @@ from storage import upsert_guild_setting
 def get_servers_for_race(race_code: str) -> list[dict]:
     return [server for server in SERVER_OPTIONS if str(server["code"]).startswith(str(race_code))]
 
-
-# =========================================================
-# 특이사항 입력
-# =========================================================
-
-class ApplicationNoteModal(discord.ui.Modal, title="특이사항 입력"):
-    특이사항 = discord.ui.TextInput(
-        label="특이사항",
-        placeholder="예: 평일 22시 이후 가능 / 트라이팟 가능",
-        required=False,
-        max_length=300,
-        style=discord.TextStyle.paragraph,
-    )
-
-    def __init__(self, parent_view: "WeekdayMultiSelectView"):
-        super().__init__()
-        self.parent_view = parent_view
-
-        if parent_view.note:
-            self.특이사항.default = parent_view.note
-
-    async def on_submit(self, interaction: discord.Interaction) -> None:
-        self.parent_view.note = str(self.특이사항.value).strip()
-        self.parent_view.value = "submit_with_note"
-
-        for item in self.parent_view.children:
-            item.disabled = True
-
-        await interaction.response.edit_message(
-            content=self.parent_view.build_summary_text(saved=False, note_entered=True),
-            view=self.parent_view,
-        )
-        self.parent_view.stop()
-
         
 # =========================================================
 # 같은 캐릭터명이 여러 종족/서버로 있을 때 선택
