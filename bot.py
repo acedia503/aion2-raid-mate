@@ -162,76 +162,7 @@ def build_application_update_embed(
     return embed
 
 
-# 공대 결과 포맷
-def party_score_sum(party: list[dict]) -> int:
-    return sum(int(member.get("combat_score", 0)) for member in party)
 
-
-def raid_score_sum_for_display(raid: dict) -> int:
-    return party_score_sum(raid.get("party1", [])) + party_score_sum(raid.get("party2", []))
-
-
-def format_party_member_line(member: dict) -> str:
-    return (
-        f"{member.get('character_name', '-')} | "
-        f"{member.get('race_name', '-')} / {member.get('server_name', '-')} | "
-        f"{member.get('job_name', '-')} | "
-        f"{member.get('item_level', 0)} | "
-        f"{member.get('combat_score', 0)}"
-    )
-
-
-def format_raid_result_text(
-    raid_name: str,
-    weekday: str,
-    raids: list[dict],
-    waiting_members: list[dict],
-    source_note: str | None = None,
-) -> str:
-    lines: list[str] = []
-    lines.append(f"[{raid_name}] {weekday} 공대 생성 결과")
-    lines.append("")
-
-    for raid in raids:
-        raid_no = raid.get("raid_no", 0)
-        party1 = raid.get("party1", [])
-        party2 = raid.get("party2", [])
-
-        total_members = len(party1) + len(party2)
-        total_score = raid_score_sum_for_display(raid)
-        avg_score = total_score // total_members if total_members else 0
-
-        lines.append(f"{raid_no}공대 | 총 아툴 {total_score} | 평균 {avg_score}")
-
-        lines.append("  1파티")
-        if party1:
-            for member in party1:
-                lines.append(f"    - {format_party_member_line(member)}")
-        else:
-            lines.append("    - 비어 있음")
-
-        lines.append("")
-        lines.append("  2파티")
-        if party2:
-            for member in party2:
-                lines.append(f"    - {format_party_member_line(member)}")
-        else:
-            lines.append("    - 비어 있음")
-
-        lines.append("")
-
-    lines.append("대기 인원")
-    if waiting_members:
-        for member in waiting_members:
-            lines.append(f"  - {format_party_member_line(member)}")
-    else:
-        lines.append("  - 없음")
-
-    if source_note:
-        lines.append("")
-        lines.append(f"※ {source_note}")
-
-    return "\n".join(lines)
 
 
 def build_raid_result_embed(
