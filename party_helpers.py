@@ -1,9 +1,8 @@
 # party_helpers.py
 # 공대 데이터 조작 유틸 담당
 
-# =========================
-# 정규화 / 공통 유틸
-# =========================
+from __future__ import annotations
+
 
 def safe_int(value: Any, default: int = 0) -> int:
     try:
@@ -19,9 +18,30 @@ def safe_str(value: Any, default: str = "") -> str:
     return text if text else default
 
 
-# =========================================================
-# 1. 파티 상태 조회
-# =========================================================
+def normalize_party_member_row(row: dict) -> dict:
+    return {
+        "id": safe_int(row.get("id")),
+        "guild_id": safe_int(row.get("guild_id")),
+        "raid_name": safe_str(row.get("raid_name"), "-"),
+        "weekday": safe_str(row.get("weekday"), "-"),
+        "raid_no": safe_int(row.get("raid_no")),
+        "party_no": row.get("party_no"),
+        "slot_no": row.get("slot_no"),
+        "status": safe_str(row.get("status"), "-"),
+        "user_id": safe_int(row.get("user_id")),
+        "user_name": safe_str(row.get("user_name"), "-"),
+        "race_code": safe_str(row.get("race_code"), "-"),
+        "race_name": safe_str(row.get("race_name"), "-"),
+        "server_code": safe_str(row.get("server_code"), "-"),
+        "server_name": safe_str(row.get("server_name"), "-"),
+        "character_name": safe_str(row.get("character_name"), "-"),
+        "job_name": safe_str(row.get("job_name"), "알수없음"),
+        "item_level": safe_int(row.get("item_level")),
+        "combat_score": safe_int(row.get("combat_score")),
+        "note": safe_str(row.get("note"), ""),
+        "source_application_id": row.get("source_application_id"),
+    }
+
 
 def list_members_in_party(rows: list[dict], raid_no: int, party_no: int) -> list[dict]:
     result: list[dict] = []
@@ -39,41 +59,41 @@ def list_members_in_party(rows: list[dict], raid_no: int, party_no: int) -> list
 
 def get_party_size(rows: list[dict], raid_no: int, party_no: int) -> int:
     return len(list_members_in_party(rows, raid_no, party_no))
-    
 
-# =========================================================
-#  2. 슬롯 관련
-# =========================================================
 
 def find_first_empty_slot(rows: list[dict], raid_no: int, party_no: int) -> int | None:
-    used = {
-        r["slot_no"]
+    used_slots = {
+        safe_int(r.get("slot_no"))
         for r in rows
-        if r["raid_no"] == raid_no
-        and r["party_no"] == party_no
+        if safe_int(r.get("raid_no")) == safe_int(raid_no)
+        and safe_int(r.get("party_no")) == safe_int(party_no)
+        and safe_str(r.get("status")) == "ASSIGNED"
     }
 
-    for i in range(1, 5):
-        if i not in used:
-            return i
+    for slot_no in range(1, 5):
+        if slot_no not in used_slots:
+            return slot_no
 
     return None
 
 
-def find_first_empty_slot(rows: list[dict], raid_no: int, party_no: int) -> int | None:
-    for r in rows:
+def get_party_slot_member(
+    rows: list[dict],
+    raid_no: int,
+    party_no: int,
+    slot_no: int,
+) -> dict | None:
+    for row in rows:
+        member = normalize_party_member_row(row)
         if (
-            r["raid_no"] == raid_no
-            and r["party_no"] == party_no
-            and r["slot_no"] == slot_no
+            safe_int(member.get("raid_no")) == safe_int(raid_no)
+            and safe_int(member.get("party_no")) == safe_int(party_no)
+            and safe_int(member.get("slot_no")) == safe_int(slot_no)
+            and safe_str(member.get("status")) == "ASSIGNED"
         ):
-            return r
+            return member
     return None
 
-
-# =========================================================
-# 3. 캐릭터 위치 찾기
-# =========================================================
 
 def find_member_in_saved_parties(
     rows: list[dict],
@@ -81,15 +101,22 @@ def find_member_in_saved_parties(
     race_code: str | None = None,
     server_code: str | None = None,
 ) -> dict | None:
-    for r in rows:
-        if r["character_name"] == character_name:
-            return r
+    for row in rows:
+        member = normalize_party_member_row(row)
+
+        if safe_str(member.get("character_name")) != safe_str(character_name):
+            continue
+
+        if race_code is not None and safe_str(member.get("race_code")) != safe_str(race_code):
+            continue
+
+        if server_code is not None and safe_str(member.get("server_code")) != safe_str(server_code):
+            continue
+
+        return member
+
     return None
 
-
-# =========================================================
-# 4. 교체 대상
-# =========================================================
 
 def find_replace_candidate_in_party(
     rows: list[dict],
@@ -108,8 +135,6 @@ def find_replace_candidate_in_party(
     if not party_members:
         return None
 
-    # 1차 규칙:
-    # 파티가 가득 차 있으면 아툴 점수가 가장 낮은 멤버를 대기로 이동
     party_members.sort(
         key=lambda m: (
             safe_int(m.get("combat_score")),
@@ -118,11 +143,6 @@ def find_replace_candidate_in_party(
     )
     return party_members[0]
 
-
-
-# =========================================================
-# 5. 공대 수정용 유틸
-# =========================================================
 
 # 해당 보조 함수 찾으면 여기에 넣기
 # remove_member_from_saved_parties
