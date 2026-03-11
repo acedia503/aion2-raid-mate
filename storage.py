@@ -1359,6 +1359,7 @@ def move_party_member_to_waiting(
 
 def update_party_member_position(
     party_row_id: int,
+    weekday: str,
     raid_no: int,
     party_no: int | None,
     slot_no: int | None,
@@ -1367,6 +1368,7 @@ def update_party_member_position(
     sql = """
     UPDATE raid_parties
     SET
+        weekday = %s,
         raid_no = %s,
         party_no = %s,
         slot_no = %s,
@@ -1376,6 +1378,7 @@ def update_party_member_position(
     execute(
         sql,
         (
+            str(weekday).strip(),
             int(raid_no),
             party_no,
             slot_no,
@@ -1383,3 +1386,63 @@ def update_party_member_position(
             int(party_row_id),
         ),
     )
+    
+
+def swap_party_members_position(
+    first_row_id: int,
+    first_weekday: str,
+    first_raid_no: int,
+    first_party_no: int | None,
+    first_slot_no: int | None,
+    first_status: str,
+    second_row_id: int,
+    second_weekday: str,
+    second_raid_no: int,
+    second_party_no: int | None,
+    second_slot_no: int | None,
+    second_status: str,
+) -> None:
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE raid_parties
+                SET
+                    weekday = %s,
+                    raid_no = %s,
+                    party_no = %s,
+                    slot_no = %s,
+                    status = %s
+                WHERE id = %s;
+                """,
+                (
+                    first_weekday,
+                    int(first_raid_no),
+                    first_party_no,
+                    first_slot_no,
+                    first_status,
+                    int(second_row_id),
+                ),
+            )
+
+            cur.execute(
+                """
+                UPDATE raid_parties
+                SET
+                    weekday = %s,
+                    raid_no = %s,
+                    party_no = %s,
+                    slot_no = %s,
+                    status = %s
+                WHERE id = %s;
+                """,
+                (
+                    second_weekday,
+                    int(second_raid_no),
+                    second_party_no,
+                    second_slot_no,
+                    second_status,
+                    int(first_row_id),
+                ),
+            )
+        conn.commit()
