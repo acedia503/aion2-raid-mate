@@ -9,6 +9,7 @@ from contextlib import contextmanager
 
 import psycopg
 from psycopg.rows import dict_row
+from collections.abc import Iterator
 
 
 def get_database_url() -> str:
@@ -19,7 +20,7 @@ def get_database_url() -> str:
 
 
 @contextmanager
-def get_connection():
+def get_connection() -> Iterator[psycopg.Connection]:
     conn = psycopg.connect(get_database_url(), row_factory=dict_row)
     try:
         yield conn
