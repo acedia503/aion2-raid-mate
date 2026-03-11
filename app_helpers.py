@@ -52,6 +52,20 @@ def split_text_by_lines(text: str, limit: int = 1800) -> list[str]:
     return chunks if chunks else ["-"]
 
 
+async def send_long_text_followup(
+    interaction: discord.Interaction,
+    text: str,
+    ephemeral: bool = False,
+    limit: int = 1800,
+):
+    chunks = split_text_by_lines(text, limit=limit)
+    for chunk in chunks:
+        await interaction.followup.send(
+            f"```text\n{chunk}\n```",
+            ephemeral=ephemeral,
+        )
+
+
 def get_race_name_by_code(race_code: str) -> str | None:
     for race in RACE_OPTIONS:
         if str(race["code"]) == str(race_code):
