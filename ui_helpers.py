@@ -310,8 +310,7 @@ def build_party_update_embed(
 
 # 취소 완료 메시지용
 def build_cancel_result_text(application: dict) -> str:
-    days = application.get("available_days") or []
-    days_text = ", ".join(days) if days else "-"
+    days_text = format_days(app.get("available_days") or [])
     note = (application.get("note") or "").strip() or "-"
 
     return (
@@ -329,8 +328,7 @@ def build_cancel_result_text(application: dict) -> str:
 
 # 강제삭제 결과 메시지용
 def build_force_delete_result_text(application: dict) -> str:
-    days = application.get("available_days") or []
-    days_text = ", ".join(days) if days else "-"
+    days_text = format_days(app.get("available_days") or [])
     note = (application.get("note") or "").strip() or "-"
 
     return (
