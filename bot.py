@@ -26,6 +26,9 @@ from storage import (
     replace_raid_parties,
     move_party_member_to_slot,
     move_party_member_to_waiting,
+    load_party_rules,
+    save_party_rules,
+    has_party_rules,
 )
 
 from raid_logic import (
@@ -1786,7 +1789,7 @@ async def update_application_command(
 
 # 관리자만 사용 가능
 
-@bot.tree.command(name="공대생성", description="레이드 공대를 자동 생성합니다. (1차 기본 규칙 버전)")
+@bot.tree.command(name="공대생성", description="레이드 공대를 자동 생성합니다.")
 @app_commands.describe(
     레이드이름="공대를 생성할 레이드 이름",
     요일="공대 생성 대상 요일",
@@ -1810,31 +1813,31 @@ async def create_parties_command(
         )
         return
 
-    레이드이름 = 레이드이름.strip()
-    요일 = 요일.strip()
+    raid_name = 레이드이름.strip()
+    weekday = 요일.strip()
 
-    if not 레이드이름:
+    if not raid_name:
         await interaction.response.send_message(
             "레이드 이름이 비어 있습니다.",
             ephemeral=True,
         )
         return
 
-    if 요일 not in VALID_WEEKDAYS:
+    if weekday not in VALID_WEEKDAYS:
         await interaction.response.send_message(
             "요일은 월, 화, 수, 목, 금, 토, 일 중 하나여야 합니다.",
             ephemeral=True,
         )
         return
 
-    await interaction.response.defer(thinking=True)
+    await interaction.response.defer(ephemeral=True, thinking=True)
 
     try:
         # 1) 레이드 존재 확인
-        raid = get_raid(interaction.guild.id, 레이드이름)
+        raid = get_raid(interaction.guild.id, raid_name)
         if raid is None:
             await interaction.followup.send(
-                f"`{레이드이름}` 레이드는 존재하지 않습니다.",
+                f"`{raid_name}` 레이드는 존재하지 않습니다.",
                 ephemeral=True,
             )
             return
@@ -1842,13 +1845,13 @@ async def create_parties_command(
         # 2) 해당 요일 신청자 조회
         applications = list_raid_applications_by_weekday(
             guild_id=interaction.guild.id,
-            raid_name=레이드이름,
-            weekday=요일,
+            raid_name=raid_name,
+            weekday=weekday,
         )
 
         if not applications:
             await interaction.followup.send(
-                f"`{레이드이름}` 레이드의 `{요일}` 신청자가 없습니다.",
+                f"`{raid_name}` 레이드의 `{weekday}` 신청자가 없습니다.",
                 ephemeral=True,
             )
             return
@@ -1856,8 +1859,8 @@ async def create_parties_command(
         # 3) 이미 생성된 공대 내역 조회
         existing_rows = list_raid_parties(
             guild_id=interaction.guild.id,
-            raid_name=레이드이름,
-            weekday=요일,
+            raid_name=raid_name,
+            weekday=weekday,
         )
 
         # 4) 이미 생성된 캐릭터 제외
@@ -1865,17 +1868,56 @@ async def create_parties_command(
 
         if not candidates:
             await interaction.followup.send(
-                f"`{레이드이름}` 레이드의 `{요일}` 신청자 중 "
+                f"`{raid_name}` 레이드의 `{weekday}` 신청자 중 "
                 "새로 생성할 수 있는 캐릭터가 없습니다.\n"
                 "이미 생성된 공대에 모두 포함되어 있을 수 있습니다.",
                 ephemeral=True,
             )
             return
 
-        # 5) 기본 규칙(ALL 8칸)
-        slot_rules = build_default_all_slot_rules()
+        # 5) 기존 규칙 불러오기
+        initial_rules = load_party_rules(interaction.guild.id, raid_name)
+        if not initial_rules:
+            initial_rules = build_default_all_slot_rules()
 
-        # 6) 공대 생성
+        # 6) 규칙 UI
+        rule_view = PartyRuleSetupView(
+            user_id=interaction.user.id,
+            initial_rules=initial_rules,
+        )
+
+        rule_message = "공대 생성 규칙을 설정하세요."
+        if has_party_rules(interaction.guild.id, raid_name):
+            rule_message += "\n기존 저장 규칙을 불러왔습니다."
+
+        await interaction.followup.send(
+            f"{rule_message}\n\n```text\n{rule_view.build_summary_text()}\n```",
+            view=rule_view,
+            ephemeral=True,
+        )
+
+        timeout = await rule_view.wait()
+        if timeout:
+            await interaction.followup.send(
+                "공대 생성 규칙 입력 시간이 초과되었습니다.",
+                ephemeral=True,
+            )
+            return
+
+        if rule_view.value != "submit" or rule_view.exported_rules is None:
+            return
+
+        slot_rules = rule_view.exported_rules
+
+        # 7) 규칙 저장
+        save_party_rules(
+            guild_id=interaction.guild.id,
+            raid_name=raid_name,
+            slots=slot_rules,
+            updated_by=interaction.user.id,
+        )
+
+        # 8) 공대 생성
         raids, waiting_members, warnings = build_balanced_raids(
             candidates=candidates,
             slot_rules=slot_rules,
@@ -1888,36 +1930,36 @@ async def create_parties_command(
             )
             return
 
-        # 7) DB 저장용 row 변환
+        # 9) DB 저장용 row 변환
         rows = flatten_raids_to_party_rows(
             guild_id=interaction.guild.id,
-            raid_name=레이드이름,
-            weekday=요일,
+            raid_name=raid_name,
+            weekday=weekday,
             raids=raids,
             waiting_members=waiting_members,
         )
 
-        # 8) 저장
+        # 10) 저장
         replace_raid_parties(
             guild_id=interaction.guild.id,
-            raid_name=레이드이름,
-            weekday=요일,
+            raid_name=raid_name,
+            weekday=weekday,
             members=rows,
         )
 
-        # 9) 출력
-        source_note = "1차 기본 규칙(ALL 8칸) 기준 / 신청 DB 저장값 기준"
+        # 11) 결과 출력
+        source_note = "설정한 공대 규칙 기준 / 신청 DB 저장값 기준"
         embed = build_raid_result_embed(
-            raid_name=레이드이름,
-            weekday=요일,
+            raid_name=raid_name,
+            weekday=weekday,
             raids=raids,
             waiting_members=waiting_members,
             source_note=source_note,
         )
 
         text = format_raid_result_text(
-            raid_name=레이드이름,
-            weekday=요일,
+            raid_name=raid_name,
+            weekday=weekday,
             raids=raids,
             waiting_members=waiting_members,
             source_note=source_note,
