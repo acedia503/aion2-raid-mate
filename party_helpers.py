@@ -135,3 +135,83 @@ def find_replace_candidate_in_party(
 # 해당 보조 함수 찾으면 여기에 넣기
 # remove_member_from_saved_parties
 # place_member_to_destination
+
+# =========================
+# 공대수정용 보조 함수
+# =========================
+
+def find_matching_generated_members(
+    rows: list[dict],
+    character_name: str,
+) -> list[dict]:
+    result: list[dict] = []
+    for row in rows:
+        member = normalize_party_member_row(row)
+        if safe_str(member.get("character_name")) == safe_str(character_name):
+            result.append(member)
+    return result
+
+
+def find_matching_generated_member(
+    rows: list[dict],
+    race_code: str,
+    server_code: str,
+    character_name: str,
+) -> dict | None:
+    for row in rows:
+        member = normalize_party_member_row(row)
+        if (
+            safe_str(member.get("race_code")) == safe_str(race_code)
+            and safe_str(member.get("server_code")) == safe_str(server_code)
+            and safe_str(member.get("character_name")) == safe_str(character_name)
+        ):
+            return member
+    return None
+
+
+def target_raid_has_other_same_user(
+    rows: list[dict],
+    target_raid_no: int,
+    moving_member: dict,
+) -> bool:
+    moving_row_id = safe_int(moving_member.get("id"))
+    moving_user_id = safe_int(moving_member.get("user_id"))
+
+    for row in rows:
+        member = normalize_party_member_row(row)
+        if safe_int(member.get("id")) == moving_row_id:
+            continue
+        if safe_int(member.get("raid_no")) != safe_int(target_raid_no):
+            continue
+        if safe_str(member.get("status")) != "ASSIGNED":
+            continue
+        if safe_int(member.get("user_id")) == moving_user_id:
+            return True
+    return False
+
+
+def can_move_member_to_target(
+    rows: list[dict],
+    moving_member: dict,
+    target_raid_no: int,
+    target_party_no: int,
+) -> tuple[bool, str]:
+    current_raid_no = safe_int(moving_member.get("raid_no"))
+    current_party_no = safe_int(moving_member.get("party_no") or 0)
+
+    if current_raid_no == safe_int(target_raid_no) and current_party_no == safe_int(target_party_no):
+        return False, "이미 해당 공대/파티에 배치되어 있습니다."
+
+    if target_raid_has_other_same_user(rows, target_raid_no, moving_member):
+        return False, "대상 공대에는 이미 같은 디스코드 계정의 다른 캐릭터가 있습니다."
+
+    return True, ""
+
+
+def list_members_in_raid_no(rows: list[dict], raid_no: int) -> list[dict]:
+    result: list[dict] = []
+    for row in rows:
+        member = normalize_party_member_row(row)
+        if safe_int(member.get("raid_no")) == safe_int(raid_no):
+            result.append(member)
+    return result
