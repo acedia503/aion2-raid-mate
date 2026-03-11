@@ -2,6 +2,63 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from constants import VALID_WEEKDAYS, RACE_OPTIONS, SERVER_OPTIONS
+
+from app_helpers import (
+    is_admin,
+    get_race_name_by_code,
+    get_server_name_by_code,
+)
+
+from settings_views import (
+    GuildSettingView,
+    RaidDeleteConfirmView,
+)
+
+from application_views import (
+    ApplicationRaceServerView,
+    WeekdayMultiSelectView,
+    ApplicationCancelView,
+    ForceDeleteRaceServerView,
+)
+
+from party_views import (
+    PartyConfirmVisibilityView,
+    PartyRuleSetupView,
+    PartyReplaceModeView,
+    PartyReplaceView,
+)
+
+from ui_helpers import (
+    format_days,
+    group_applications_by_raid,
+    build_raid_application_embed,
+    build_cancel_result_text,
+    build_force_delete_result_text,
+    build_application_update_embed,
+    build_raid_result_embed,
+    format_raid_result_text,
+    build_party_check_embed,
+    format_party_check_text_for_weekday,
+    build_party_update_embed,
+    send_long_text_followup,
+)
+
+from party_helpers import (
+    find_matching_generated_members,
+    find_matching_generated_member,
+    can_move_member_to_target,
+    find_first_empty_slot,
+    find_replace_candidate_in_party,
+    list_members_in_party,
+)
+
+from raid_logic import (
+    build_balanced_raids,
+    exclude_already_generated_characters,
+    flatten_raids_to_party_rows,
+)
+
 from storage import (
     init_db,
     get_guild_setting,
@@ -24,8 +81,6 @@ from storage import (
     list_raid_applications_by_weekday,
     list_raid_parties,
     replace_raid_parties,
-    move_party_member_to_slot,
-    move_party_member_to_waiting,
     load_party_rules,
     save_party_rules,
     has_party_rules,
@@ -33,36 +88,22 @@ from storage import (
     swap_party_members_position,
 )
 
-from raid_logic import (
-    build_balanced_raids,
-    exclude_already_generated_characters,
-    flatten_raids_to_party_rows,
-    PartyConfirmVisibilityView,
-    find_matching_generated_members,
-    find_matching_generated_member,
-    can_move_member_to_target,
-    find_first_empty_slot,
-    find_replace_candidate_in_party,
-    list_members_in_party,
-)
-
-from views import (
-    GuildSettingView,
-    RaidDeleteConfirmView,
-    ApplicationRaceServerView,
-    WeekdayMultiSelectView,
-    ApplicationCancelView,
-    ForceDeleteRaceServerView,
-    PartyRuleSetupView,
-    PartyReplaceModeView,
-    PartyReplaceView,
-)
-
 from atool import get_character_info, AtoolError
+
 
 # ========================================================
 # 슬래시 선택지 정의
 # ========================================================
+
+RACE_CHOICES = [
+    app_commands.Choice(name=item["name"], value=item["code"])
+    for item in RACE_OPTIONS
+]
+
+SERVER_CHOICES = [
+    app_commands.Choice(name=item["name"], value=item["code"])
+    for item in SERVER_OPTIONS
+]
 
 CONDITION_TYPE_CHOICES = [
     app_commands.Choice(name="템렙", value="item_level"),
@@ -72,30 +113,6 @@ CONDITION_TYPE_CHOICES = [
 # ========================================================
 # 공통 유틸 함수
 # ========================================================
-
-def is_admin(interaction: discord.Interaction) -> bool:
-    if interaction.guild is None:
-        return False
-    return interaction.user.guild_permissions.administrator
-
-
-def get_race_name_by_code(race_code: str) -> str | None:
-    for choice in RACE_CHOICES:
-        if str(choice.value) == str(race_code):
-            return choice.name
-    return None
-
-
-def get_server_name_by_code(server_code: str) -> str | None:
-    for choice in SERVER_CHOICES:
-        if str(choice.value) == str(server_code):
-            return choice.name
-    return None
-
-
-
-
-
 
 # 기본 슬롯 규칙 함수
 def build_default_all_slot_rules() -> list[dict]:
@@ -2369,4 +2386,4 @@ async def on_ready():
     print(f"{bot.user} 로그인 완료")
 
 
-bot.run("DISCORD_TOKEN")
+bot.run(os.getenv("DISCORD_BOT_TOKEN") or os.getenv("DISCORD_TOKEN"))
