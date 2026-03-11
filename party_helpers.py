@@ -24,7 +24,7 @@ def get_party_size(rows, raid_no, party_no):
     
 
 # =========================================================
-#  2. 슬롯 관
+#  2. 슬롯 관련
 # =========================================================
 
 def find_first_empty_slot(rows, raid_no, party_no):
@@ -54,7 +54,7 @@ def get_party_slot_member(rows, raid_no, party_no, slot_no):
 
 
 # =========================================================
-# 3. 캐릭터 위치 찾
+# 3. 캐릭터 위치 찾기
 # =========================================================
 
 def find_member_in_saved_parties(rows, character_name):
@@ -68,7 +68,35 @@ def find_member_in_saved_parties(rows, character_name):
 # 4. 교체 대상
 # =========================================================
 
-find_replace_candidate_in_party
+def find_replace_candidate_in_party(
+    rows: list[dict],
+    target_raid_no: int,
+    target_party_no: int,
+    exclude_row_id: int | None = None,
+) -> dict | None:
+    party_members = list_members_in_party(rows, target_raid_no, target_party_no)
+
+    if exclude_row_id is not None:
+        party_members = [
+            member for member in party_members
+            if safe_int(member.get("id")) != safe_int(exclude_row_id)
+        ]
+
+    if not party_members:
+        return None
+
+    # 1차 규칙:
+    # 파티가 가득 차 있으면 아툴 점수가 가장 낮은 멤버를 대기로 이동
+    party_members.sort(
+        key=lambda m: (
+            safe_int(m.get("combat_score")),
+            safe_int(m.get("slot_no")),
+        )
+    )
+    return party_members[0]
+
+    return rows
+
 
 
 # =========================================================
