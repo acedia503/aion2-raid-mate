@@ -6,7 +6,7 @@ from __future__ import annotations
 import discord
 
 from app_helpers import get_servers_for_race
-from constants import RACE_OPTIONS
+from constants import RACE_OPTIONS, WEEKDAY_OPTIONS
 
 
 # =========================================================
@@ -340,4 +340,4 @@ class WeekdaySelect(discord.ui.Select):
             view=self.parent_view,
         )
 
-ApplicationNoteModal
+#ApplicationNoteModal
