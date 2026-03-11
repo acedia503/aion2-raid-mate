@@ -1,6 +1,14 @@
 # settings_views.py
 # 관리자가 사전 설정하는 부분 관 UI
 
+from __future__ import annotations
+
+import discord
+
+from app_helpers import get_servers_for_race
+from constants import RACE_OPTIONS
+from storage import upsert_guild_setting
+
 
 # =========================================================
 # 디코 서버의 종족/서버 설정
@@ -89,6 +97,7 @@ class GuildSettingView(discord.ui.View):
             content="설정이 취소되었습니다.",
             view=self,
         )
+        self.stop()
 
 
 # =========================================================
