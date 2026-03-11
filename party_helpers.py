@@ -75,7 +75,12 @@ def find_first_empty_slot(rows: list[dict], raid_no: int, party_no: int) -> int 
 # 3. 캐릭터 위치 찾기
 # =========================================================
 
-def find_member_in_saved_parties(rows: list[dict], character_name: str) -> dict | None:
+def find_member_in_saved_parties(
+    rows: list[dict],
+    character_name: str,
+    race_code: str | None = None,
+    server_code: str | None = None,
+) -> dict | None:
     for r in rows:
         if r["character_name"] == character_name:
             return r
