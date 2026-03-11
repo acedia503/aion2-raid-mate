@@ -5,6 +5,16 @@ from __future__ import annotations
 
 VALID_WEEKDAYS = {"월", "화", "수", "목", "금", "토", "일"}
 
+WEEKDAY_OPTIONS = [
+    {"name": "월", "value": "월"},
+    {"name": "화", "value": "화"},
+    {"name": "수", "value": "수"},
+    {"name": "목", "value": "목"},
+    {"name": "금", "value": "금"},
+    {"name": "토", "value": "토"},
+    {"name": "일", "value": "일"},
+]
+
 RACE_OPTIONS = [
     {"name": "천족", "code": "1"},
     {"name": "마족", "code": "2"},
