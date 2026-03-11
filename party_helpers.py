@@ -1,6 +1,24 @@
 # party_helpers.py
 # 공대 데이터 조작 유틸 담당
 
+# =========================
+# 정규화 / 공통 유틸
+# =========================
+
+def safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def safe_str(value: Any, default: str = "") -> str:
+    if value is None:
+        return default
+    text = str(value).strip()
+    return text if text else default
+
+
 # =========================================================
 # 1. 파티 상태 조회
 # =========================================================
@@ -19,7 +37,7 @@ def list_members_in_party(rows: list[dict], raid_no: int, party_no: int) -> list
     return result
 
 
-def get_party_size(rows, raid_no, party_no):
+def get_party_size(rows: list[dict], raid_no: int, party_no: int) -> int:
     return len(list_members_in_party(rows, raid_no, party_no))
     
 
@@ -27,7 +45,7 @@ def get_party_size(rows, raid_no, party_no):
 #  2. 슬롯 관련
 # =========================================================
 
-def find_first_empty_slot(rows, raid_no, party_no):
+def find_first_empty_slot(rows: list[dict], raid_no: int, party_no: int) -> int | None:
     used = {
         r["slot_no"]
         for r in rows
@@ -42,7 +60,7 @@ def find_first_empty_slot(rows, raid_no, party_no):
     return None
 
 
-def get_party_slot_member(rows, raid_no, party_no, slot_no):
+def find_first_empty_slot(rows: list[dict], raid_no: int, party_no: int) -> int | None:
     for r in rows:
         if (
             r["raid_no"] == raid_no
@@ -57,7 +75,7 @@ def get_party_slot_member(rows, raid_no, party_no, slot_no):
 # 3. 캐릭터 위치 찾기
 # =========================================================
 
-def find_member_in_saved_parties(rows, character_name):
+def find_member_in_saved_parties(rows: list[dict], character_name: str) -> dict | None:
     for r in rows:
         if r["character_name"] == character_name:
             return r
@@ -94,8 +112,6 @@ def find_replace_candidate_in_party(
         )
     )
     return party_members[0]
-
-    return rows
 
 
 
