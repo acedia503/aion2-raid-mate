@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import discord
 
-from app_helpers import format_days
+from app_helpers import format_days, split_text_by_lines, send_long_text_followup
 
     
 # 신청 한 줄 포맷 함수
@@ -305,7 +305,7 @@ def build_party_update_embed(
                 inline=False,
             )
 
-    embed.set_footer(text="※ 템렙/아툴 점수는 공대 생성 시 기준입니다.")
+    embed.set_footer(text="※ 템렙/아툴 점수는 공대 생성 시점 기준입니다.")
     return embed
 
 
