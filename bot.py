@@ -25,6 +25,7 @@ from party_helpers import (
     list_members_in_party,
     raid_has_same_user_after_swap,
     split_members_already_assigned_other_weekday,
+    build_default_all_slot_rules,
 )
 from party_views import (
     PartyConfirmVisibilityView,
@@ -92,12 +93,7 @@ VIEW_OPTION_CHOICES = [
 
 
 
-def make_character_key(row: dict) -> tuple[str, str, str]:
-    return (
-        str(row.get("race_code", "")).strip(),
-        str(row.get("server_code", "")).strip(),
-        str(row.get("character_name", "")).strip().lower(),
-    )
+
 
 
 def find_generated_rows_for_target(generated_rows: list[dict], target: dict) -> list[dict]:
