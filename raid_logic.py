@@ -1,16 +1,9 @@
-# raid_logic.py
 from __future__ import annotations
-
-from typing import Any
 
 from constants import JOB_ROLE_MAP
 from app_helpers import safe_int, safe_str
 from party_helpers import normalize_party_member_row
 
-
-# =========================
-# 정규화 / 공통 유틸
-# =========================
 
 def normalize_application_row(row: dict) -> dict:
     return {
@@ -42,19 +35,11 @@ def member_identity(member: dict) -> tuple:
 
 
 def member_display_key(member: dict) -> str:
-    return (
-        f"{member.get('character_name', '-')}"
-        f" ({member.get('race_name', '-')}/{member.get('server_name', '-')})"
-    )
+    return f"{member.get('character_name', '-')} ({member.get('race_name', '-')}/{member.get('server_name', '-')})"
 
-
-# =========================
-# 요일 / 후보 필터링
-# =========================
 
 def has_weekday(member: dict, weekday: str) -> bool:
-    days = member.get("available_days") or []
-    return weekday in days
+    return weekday in (member.get("available_days") or [])
 
 
 def filter_candidates_by_weekday(applications: list[dict], weekday: str) -> list[dict]:
@@ -66,25 +51,10 @@ def filter_candidates_by_weekday(applications: list[dict], weekday: str) -> list
     return result
 
 
-def exclude_already_generated_characters(
-    candidates: list[dict],
-    existing_members: list[dict],
-) -> list[dict]:
-    existing_ids = {
-        member_identity(normalize_party_member_row(row))
-        for row in existing_members
-    }
+def exclude_already_generated_characters(candidates: list[dict], existing_members: list[dict]) -> list[dict]:
+    existing_ids = {member_identity(normalize_party_member_row(row)) for row in existing_members}
+    return [candidate for candidate in candidates if member_identity(candidate) not in existing_ids]
 
-    result: list[dict] = []
-    for candidate in candidates:
-        if member_identity(candidate) not in existing_ids:
-            result.append(candidate)
-    return result
-
-
-# =========================
-# 역할 / 직업 매칭
-# =========================
 
 def get_job_roles(job_name: str) -> set[str]:
     return JOB_ROLE_MAP.get(safe_str(job_name), {"DPS"})
@@ -105,16 +75,8 @@ def job_matches_preferred(job_name: str, preferred_jobs: list[str]) -> bool:
 
 def can_place_member_in_slot(member: dict, slot_rule: dict) -> bool:
     role_type = safe_str(slot_rule.get("role_type"), "ALL").upper()
-    preferred_jobs = list(slot_rule.get("preferred_jobs") or [])
-
     if not job_matches_role(member["job_name"], role_type):
         return False
-
-    # ALL은 누구나 가능, preferred_jobs는 우선순위용
-    if role_type == "ALL":
-        return True
-
-    # 탱/딜/힐은 역할만 맞으면 일단 가능
     return True
 
 
@@ -122,20 +84,13 @@ def score_member_for_slot(member: dict, slot_rule: dict) -> int:
     score = 0
     role_type = safe_str(slot_rule.get("role_type"), "ALL").upper()
     preferred_jobs = list(slot_rule.get("preferred_jobs") or [])
-
     if job_matches_role(member["job_name"], role_type):
         score += 100
-
     if preferred_jobs and job_matches_preferred(member["job_name"], preferred_jobs):
         score += 50
-
     score += safe_int(member.get("combat_score")) // 1000
     return score
 
-
-# =========================
-# 공대 / 파티 점수 계산
-# =========================
 
 def party_score_sum(party: list[dict]) -> int:
     return sum(safe_int(member.get("combat_score")) for member in party)
@@ -145,34 +100,11 @@ def raid_score_sum(raid: dict) -> int:
     return party_score_sum(raid["party1"]) + party_score_sum(raid["party2"])
 
 
-def party_average_score(party: list[dict]) -> int:
-    if not party:
-        return 0
-    return party_score_sum(party) // len(party)
-
-
-def raid_average_score(raid: dict) -> int:
-    members = raid["party1"] + raid["party2"]
-    if not members:
-        return 0
-    return raid_score_sum(raid) // len(members)
-
-
-# =========================
-# 공대 기본 구조
-# =========================
-
 def make_empty_raid(raid_no: int) -> dict:
-    return {
-        "raid_no": raid_no,
-        "party1": [],
-        "party2": [],
-    }
+    return {"raid_no": raid_no, "party1": [], "party2": []}
 
 
 def slot_index_to_party_slot(slot_index: int) -> tuple[int, int]:
-    # 1~4 -> party1 slot1~4
-    # 5~8 -> party2 slot1~4
     if 1 <= slot_index <= 4:
         return 1, slot_index
     return 2, slot_index - 4
@@ -186,7 +118,6 @@ def get_slot_member(raid: dict, slot_index: int) -> dict | None:
     party_no, slot_no = slot_index_to_party_slot(slot_index)
     party = get_party_by_no(raid, party_no)
     idx = slot_no - 1
-
     if idx < len(party):
         return party[idx]
     return None
@@ -196,21 +127,14 @@ def set_slot_member(raid: dict, slot_index: int, member: dict) -> None:
     party_no, slot_no = slot_index_to_party_slot(slot_index)
     party = get_party_by_no(raid, party_no)
     idx = slot_no - 1
-
     while len(party) <= idx:
         party.append({})
-
     party[idx] = member
 
 
 def is_slot_filled(raid: dict, slot_index: int) -> bool:
-    member = get_slot_member(raid, slot_index)
-    return bool(member)
+    return bool(get_slot_member(raid, slot_index))
 
-
-# =========================
-# 중복 규칙
-# =========================
 
 def raid_has_same_user_id(raid: dict, user_id: int) -> bool:
     for party_name in ("party1", "party2"):
@@ -219,10 +143,6 @@ def raid_has_same_user_id(raid: dict, user_id: int) -> bool:
                 return True
     return False
 
-
-# =========================
-# 후보 정렬
-# =========================
 
 def role_priority(member: dict) -> int:
     roles = get_job_roles(member["job_name"])
@@ -245,10 +165,6 @@ def sort_candidates_for_generation(candidates: list[dict]) -> list[dict]:
     )
 
 
-# =========================
-# 슬롯 규칙 구조화
-# =========================
-
 def make_slot_map_from_rules(rules: list[dict]) -> dict[int, dict]:
     slot_map: dict[int, dict] = {}
     for rule in rules:
@@ -261,42 +177,24 @@ def make_slot_map_from_rules(rules: list[dict]) -> dict[int, dict]:
     return slot_map
 
 
-# =========================
-# 배치 로직
-# =========================
-
-def find_best_raid_for_member(
-    member: dict,
-    raids: list[dict],
-    slot_index: int,
-) -> dict | None:
+def find_best_raid_for_member(member: dict, raids: list[dict], slot_index: int) -> dict | None:
     available_raids = [
         raid for raid in raids
         if not raid_has_same_user_id(raid, member["user_id"])
         and not is_slot_filled(raid, slot_index)
     ]
-
     if not available_raids:
         return None
-
-    # 총 아툴이 가장 낮은 공대 우선
     available_raids.sort(key=raid_score_sum)
     return available_raids[0]
 
 
-def place_member_into_slot(
-    member: dict,
-    raids: list[dict],
-    slot_index: int,
-    slot_rule: dict,
-) -> bool:
+def place_member_into_slot(member: dict, raids: list[dict], slot_index: int, slot_rule: dict) -> bool:
     if not can_place_member_in_slot(member, slot_rule):
         return False
-
     target_raid = find_best_raid_for_member(member, raids, slot_index)
     if target_raid is None:
         return False
-
     set_slot_member(target_raid, slot_index, member)
     return True
 
@@ -306,116 +204,81 @@ def find_fillable_slot_indices(raid: dict, slot_map: dict[int, dict], member: di
     for slot_index in range(1, 9):
         if is_slot_filled(raid, slot_index):
             continue
-
         slot_rule = slot_map.get(slot_index, {"slot_index": slot_index, "role_type": "ALL", "preferred_jobs": []})
         if can_place_member_in_slot(member, slot_rule):
             result.append(slot_index)
     return result
 
 
-def find_best_open_slot_for_member(
-    member: dict,
-    raids: list[dict],
-    slot_map: dict[int, dict],
-) -> tuple[dict, int] | None:
-    candidates: list[tuple[int, int, dict, int]] = []
-    # (raid_score, -slot_score, raid, slot_index)
-
+def find_best_open_slot_for_member(member: dict, raids: list[dict], slot_map: dict[int, dict]) -> tuple[dict, int] | None:
+    candidates: list[tuple[int, int, int, dict, int]] = []
     for raid in raids:
         if raid_has_same_user_id(raid, member["user_id"]):
             continue
-
         fillable_slots = find_fillable_slot_indices(raid, slot_map, member)
         for slot_index in fillable_slots:
             slot_rule = slot_map.get(slot_index, {"slot_index": slot_index, "role_type": "ALL", "preferred_jobs": []})
             slot_score = score_member_for_slot(member, slot_rule)
-            candidates.append((raid_score_sum(raid), -slot_score, raid, slot_index))
-
+            candidates.append((raid_score_sum(raid), -slot_score, slot_index, raid, slot_index))
     if not candidates:
         return None
-
-    candidates.sort(key=lambda x: (x[0], x[1], x[3]))
-    _, _, raid, slot_index = candidates[0]
+    candidates.sort(key=lambda x: (x[0], x[1], x[2]))
+    _, _, _, raid, slot_index = candidates[0]
     return raid, slot_index
 
 
-def build_balanced_raids(
-    candidates: list[dict],
-    slot_rules: list[dict],
-) -> tuple[list[dict], list[dict], list[str]]:
-    """
-    반환:
-    - raids
-    - waiting_members
-    - warnings
-    """
+def build_balanced_raids(candidates: list[dict], slot_rules: list[dict]) -> tuple[list[dict], list[dict], list[str]]:
     warnings: list[str] = []
-    candidates = [normalize_application_row(row) for row in candidates]
-    candidates = sort_candidates_for_generation(candidates)
-
-    if not candidates:
+    normalized = [normalize_application_row(row) for row in candidates]
+    normalized = sort_candidates_for_generation(normalized)
+    if not normalized:
         return [], [], warnings
 
-    # 필요 공대 수 계산: 8명당 1공대
-    raid_count = (len(candidates) + 7) // 8
+    raid_count = (len(normalized) + 7) // 8
     raids = [make_empty_raid(i + 1) for i in range(raid_count)]
-
     slot_map = make_slot_map_from_rules(slot_rules)
-
     assigned_identities: set[tuple] = set()
     waiting_members: list[dict] = []
 
-    # 1차: 규칙 강한 슬롯부터 채움 (탱/힐 우선)
-    prioritized_slots = []
+    prioritized_slots: list[tuple[int, int]] = []
     for slot_index in range(1, 9):
         rule = slot_map.get(slot_index, {"slot_index": slot_index, "role_type": "ALL", "preferred_jobs": []})
         role_type = rule["role_type"]
         priority = 0 if role_type in ("TANK", "HEAL") else 1
         prioritized_slots.append((priority, slot_index))
-
     prioritized_slots.sort()
 
-    remaining = candidates[:]
-
+    remaining = normalized[:]
     for _, slot_index in prioritized_slots:
         slot_rule = slot_map.get(slot_index, {"slot_index": slot_index, "role_type": "ALL", "preferred_jobs": []})
-
         next_remaining: list[dict] = []
         for member in remaining:
             identity = member_identity(member)
             if identity in assigned_identities:
                 continue
-
-            placed = place_member_into_slot(member, raids, slot_index, slot_rule)
-            if placed:
+            if place_member_into_slot(member, raids, slot_index, slot_rule):
                 assigned_identities.add(identity)
             else:
                 next_remaining.append(member)
-
         remaining = next_remaining
 
-    # 2차: 남은 사람을 빈 자리 어디든 최대한 배치
     still_remaining: list[dict] = []
     for member in remaining:
         identity = member_identity(member)
         if identity in assigned_identities:
             continue
-
         result = find_best_open_slot_for_member(member, raids, slot_map)
         if result is None:
             still_remaining.append(member)
             continue
-
         raid, slot_index = result
         set_slot_member(raid, slot_index, member)
         assigned_identities.add(identity)
 
-    # 3차: 못 들어간 인원은 대기
     for member in still_remaining:
         waiting_members.append(member)
         warnings.append(f"대기 배정: {member_display_key(member)}")
 
-    # 빈 dict 제거 및 party 길이 정리
     for raid in raids:
         raid["party1"] = [m for m in raid["party1"] if m]
         raid["party2"] = [m for m in raid["party2"] if m]
@@ -423,22 +286,10 @@ def build_balanced_raids(
     return raids, waiting_members, warnings
 
 
-# =========================
-# DB 저장용 변환
-# =========================
-
-def flatten_raids_to_party_rows(
-    guild_id: int,
-    raid_name: str,
-    weekday: str,
-    raids: list[dict],
-    waiting_members: list[dict],
-) -> list[dict]:
+def flatten_raids_to_party_rows(guild_id: int, raid_name: str, weekday: str, raids: list[dict], waiting_members: list[dict]) -> list[dict]:
     rows: list[dict] = []
-
     for raid in raids:
         raid_no = safe_int(raid.get("raid_no"))
-
         for party_no, party_key in ((1, "party1"), (2, "party2")):
             party = raid.get(party_key, [])
             for slot_no, member in enumerate(party, start=1):
@@ -492,5 +343,3 @@ def flatten_raids_to_party_rows(
             }
         )
     return rows
-
-
