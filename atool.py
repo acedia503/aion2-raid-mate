@@ -4,6 +4,9 @@ from __future__ import annotations
 from typing import Any
 
 import requests
+import time
+import threading
+
 from app_helpers import safe_int
 
 ATOOL_SEARCH_URL = "https://www.aion2tool.com/api/character/search"
@@ -21,6 +24,10 @@ DEFAULT_HEADERS = {
     "Origin": "https://www.aion2tool.com",
     "Referer": "https://www.aion2tool.com/",
 }
+
+MIN_REQUEST_INTERVAL = 0.35  # 초 단위, 필요하면 0.3~0.5 사이 조정
+_request_lock = threading.Lock()
+_last_request_ts = 0.0
 
 
 class AtoolError(Exception):
@@ -119,6 +126,8 @@ def get_character_info(
     }
 
     try:
+        wait_for_rate_limit()
+
         response = requests.post(
             ATOOL_SEARCH_URL,
             json=payload,
@@ -157,3 +166,16 @@ def get_character_info(
         raise AtoolError("캐릭터 조회 결과가 비어 있습니다.")
 
     return result
+
+
+def wait_for_rate_limit() -> None:
+    global _last_request_ts
+
+    with _request_lock:
+        now = time.monotonic()
+        elapsed = now - _last_request_ts
+
+        if elapsed < MIN_REQUEST_INTERVAL:
+            time.sleep(MIN_REQUEST_INTERVAL - elapsed)
+
+        _last_request_ts = time.monotonic()
