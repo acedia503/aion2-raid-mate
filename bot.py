@@ -52,6 +52,7 @@ from party_helpers import (
     list_members_in_party,
     group_party_rows_by_weekday,
     convert_rows_to_raid_structure,
+    raid_has_same_user_after_swap,
 )
 
 from raid_logic import (
@@ -2191,6 +2192,19 @@ async def update_party_member_command(
                 user_id=interaction.user.id,
                 members=party_members,
             )
+
+            if replace_mode == "swap":
+                if raid_has_same_user_after_swap(
+                    rows=rows,
+                    moving_member=moving_member,
+                    replaced_member=replaced_member,
+                    target_raid_no=공대,
+                ):
+                    await interaction.followup.send(
+                        "교체 후 대상 공대에 같은 디스코드 계정의 다른 캐릭터가 남게 되어 이동할 수 없습니다.",
+                        ephemeral=True,
+                    )
+                    return
 
             if replace_mode == "swap":
                 await interaction.followup.send(
