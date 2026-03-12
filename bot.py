@@ -98,9 +98,6 @@ def find_generated_rows_for_target(generated_rows: list[dict], target: dict) -> 
     return [row for row in generated_rows if make_character_key(row) == key]
 
 
-
-
-
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
