@@ -10,32 +10,34 @@ class ApplicationRaceServerView(discord.ui.View):
     def __init__(self, user_id: int):
         super().__init__(timeout=180)
         self.user_id = user_id
+
         self.selected_race_code: str | None = None
         self.selected_race_name: str | None = None
         self.selected_server_code: str | None = None
         self.selected_server_name: str | None = None
+
         self.value: str | None = None
+
         self.race_select = ApplicationRaceSelect(self)
         self.server_select: ApplicationServerSelect | None = None
+
         self.add_item(self.race_select)
 
-    def refresh_components(self) -> None:
-        for item in list(self.children):
-            if isinstance(item, (ApplicationRaceSelect, ApplicationServerSelect)):
-                self.remove_item(item)
-    
-        self.race_select = ApplicationRaceSelect(self)
-        self.add_item(self.race_select)
-    
+    def refresh_server_select(self) -> None:
+        if self.server_select is not None:
+            self.remove_item(self.server_select)
+            self.server_select = None
+
         if self.selected_race_code:
             self.server_select = ApplicationServerSelect(self, self.selected_race_code)
             self.add_item(self.server_select)
-        else:
-            self.server_select = None
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("이 UI는 명령어를 실행한 사용자만 사용할 수 있습니다.", ephemeral=True)
+            await interaction.response.send_message(
+                "이 UI는 명령어를 실행한 사용자만 사용할 수 있습니다.",
+                ephemeral=True,
+            )
             return False
         return True
 
@@ -75,14 +77,8 @@ class ApplicationRaceSelect(discord.ui.Select):
     def __init__(self, parent_view: "ApplicationRaceServerView"):
         self.parent_view = parent_view
 
-        selected_code = parent_view.selected_race_code
-
         options = [
-            discord.SelectOption(
-                label=race["name"],
-                value=race["code"],
-                default=(race["code"] == selected_code),
-            )
+            discord.SelectOption(label=race["name"], value=race["code"])
             for race in RACE_OPTIONS
         ]
 
@@ -95,18 +91,36 @@ class ApplicationRaceSelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.parent_view.user_id:
+            await interaction.response.send_message(
+                "이 UI는 명령어를 실행한 사용자만 사용할 수 있습니다.",
+                ephemeral=True,
+            )
+            return
+
         selected_code = self.values[0]
         selected_race = next((r for r in RACE_OPTIONS if r["code"] == selected_code), None)
+
         if selected_race is None:
-            await interaction.response.send_message("선택한 종족 정보를 찾을 수 없습니다.", ephemeral=True)
+            await interaction.response.send_message(
+                "선택한 종족 정보를 찾을 수 없습니다.",
+                ephemeral=True,
+            )
             return
+
         self.parent_view.selected_race_code = selected_race["code"]
         self.parent_view.selected_race_name = selected_race["name"]
+
         self.parent_view.selected_server_code = None
         self.parent_view.selected_server_name = None
-        self.parent_view.refresh_components()
+
+        self.parent_view.refresh_server_select()
+
         await interaction.response.edit_message(
-            content=f"종족: **{self.parent_view.selected_race_name}** 선택됨\n이제 종족 서버를 선택하세요.",
+            content=(
+                f"종족: **{self.parent_view.selected_race_name}** 선택됨\n"
+                "이제 종족 서버를 선택하세요."
+            ),
             view=self.parent_view,
         )
 
