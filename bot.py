@@ -8,9 +8,7 @@ from discord.ext import commands
 
 from constants import VALID_WEEKDAYS, RACE_OPTIONS, SERVER_OPTIONS
 
-from app_helpers import (
-    is_admin,
-)
+from app_helpers import is_admin
 
 from settings_views import (
     GuildSettingView,
@@ -20,7 +18,6 @@ from settings_views import (
 from application_views import (
     ApplicationRaceServerView,
     WeekdayMultiSelectView,
-    ApplicationCancelView,
     ForceDeleteRaceServerView,
 )
 
