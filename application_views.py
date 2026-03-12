@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import discord
 
-from app_helpers import get_servers_for_race, format_days
 from constants import RACE_OPTIONS, WEEKDAY_OPTIONS
+from app_helpers import get_servers_for_race, format_days
 
 
 # =========================================================
@@ -52,6 +52,7 @@ class ApplicationRaceServerView(discord.ui.View):
     async def on_timeout(self) -> None:
         for item in self.children:
             item.disabled = True
+        self.stop()
 
     @discord.ui.button(label="확인", style=discord.ButtonStyle.success, row=2)
     async def confirm_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -317,13 +318,18 @@ class WeekdaySelect(discord.ui.Select):
     def __init__(self, parent_view: "WeekdayMultiSelectView"):
         self.parent_view = parent_view
 
-        super().__init__(
-            placeholder="가능 요일을 선택하세요 (중복 선택 가능)",
-            min_values=1,
-            max_values=7,
-            options=WEEKDAY_OPTIONS,
-            row=0,
-        )
+    options = [
+        discord.SelectOption(label=day["name"], value=day["value"])
+        for day in WEEKDAY_OPTIONS
+    ]
+    
+    super().__init__(
+        placeholder="가능 요일을 선택하세요 (중복 선택 가능)",
+        min_values=1,
+        max_values=7,
+        options=options,
+        row=0,
+    )
 
     async def callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.parent_view.user_id:
