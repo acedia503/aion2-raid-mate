@@ -1,4 +1,4 @@
 discord.py
 requests
-psycopg2-binary
+psycopg
 python-dotenv
