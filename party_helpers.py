@@ -252,3 +252,46 @@ def split_members_already_assigned_other_weekday(
             available_candidates.append(candidate)
 
     return available_candidates, cross_weekday_members
+
+
+def refresh_candidates_for_party_generation_optimized(candidates: list[dict]) -> tuple[list[dict], list[str]]:
+    refreshed_candidates: list[dict] = []
+    warnings: list[str] = []
+    refreshed_map: dict[tuple[str, str, str], dict] = {}
+
+    for candidate in candidates:
+        key = make_character_key(candidate)
+        if key in refreshed_map:
+            refreshed_candidates.append(dict(refreshed_map[key]))
+            continue
+
+        original_score = int(candidate.get("combat_score", 0))
+        original_level = int(candidate.get("item_level", 0))
+        refreshed = dict(candidate)
+        try:
+            data = get_character_info(
+                race_code=candidate["race_code"],
+                race_name=candidate["race_name"],
+                server_code=candidate["server_code"],
+                server_name=candidate["server_name"],
+                character_name=candidate["character_name"],
+            )
+            refreshed.update(
+                {
+                    "character_name": data["nickname"],
+                    "job_name": data["job_name"],
+                    "item_level": data["item_level"],
+                    "combat_score": data["combat_score"],
+                    "peak_combat_score": data["peak_combat_score"],
+                }
+            )
+            if data["combat_score"] != original_score or data["item_level"] != original_level:
+                warnings.append(
+                    f"재조회 반영: {candidate['character_name']} | 템렙 {original_level}→{data['item_level']} | 아툴 {original_score}→{data['combat_score']}"
+                )
+        except Exception as e:
+            warnings.append(f"재조회 실패(기존값 유지): {candidate['character_name']} | {e}")
+        refreshed_map[key] = refreshed
+        refreshed_candidates.append(dict(refreshed))
+
+    return refreshed_candidates, warnings
