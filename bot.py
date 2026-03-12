@@ -12,6 +12,7 @@ from application_views import (
     ApplicationRaceServerView,
     ForceDeleteRaceServerView,
     WeekdayMultiSelectView,
+    make_character_key,
 )
 from atool import AtoolError, get_character_info
 from constants import RACE_OPTIONS, SERVER_OPTIONS, VALID_WEEKDAYS
