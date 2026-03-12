@@ -14,13 +14,88 @@ async def send_long_text_followup(
     ephemeral: bool = False,
     limit: int = 1800,
 ):
-    chunks = split_text_by_lines(text, limit=limit)
+    chunks = split_raid_text_by_sections(text, limit=limit)
     for chunk in chunks:
         await interaction.followup.send(
             f"```text\n{chunk}\n```",
             ephemeral=ephemeral,
         )
 
+
+def split_raid_text_by_sections(text: str, limit: int = 1800) -> list[str]:
+    """
+    공대 결과 텍스트를 섹션 단위로 분리한다.
+    우선순위:
+    1) 'N공대 |' 로 시작하는 공대 블록
+    2) '대기 인원'
+    3) 맨 앞 헤더
+    """
+
+    if not text:
+        return ["-"]
+
+    lines = text.splitlines()
+
+    sections: list[str] = []
+    current_section: list[str] = []
+
+    def flush_section() -> None:
+        nonlocal current_section
+        if current_section:
+            sections.append("\n".join(current_section).strip("\n"))
+            current_section = []
+
+    for line in lines:
+        stripped = line.strip()
+
+        is_new_section = False
+
+        if stripped.endswith("공대 생성 결과") or stripped.endswith("공대 확인"):
+            is_new_section = True
+        elif "공대 | 총 아툴" in stripped:
+            is_new_section = True
+        elif stripped == "대기 인원":
+            is_new_section = True
+
+        if is_new_section:
+            flush_section()
+
+        current_section.append(line)
+
+    flush_section()
+
+    if not sections:
+        return [text]
+
+    chunks: list[str] = []
+    current_chunk = ""
+
+    for section in sections:
+        if not current_chunk:
+            if len(section) <= limit:
+                current_chunk = section
+            else:
+                # 섹션 자체가 limit 초과면 기존 줄 단위 분할로 fallback
+                sub_chunks = split_text_by_lines(section, limit=limit)
+                chunks.extend(sub_chunks)
+        else:
+            candidate = f"{current_chunk}\n\n{section}"
+            if len(candidate) <= limit:
+                current_chunk = candidate
+            else:
+                chunks.append(current_chunk)
+                if len(section) <= limit:
+                    current_chunk = section
+                else:
+                    sub_chunks = split_text_by_lines(section, limit=limit)
+                    chunks.extend(sub_chunks[:-1])
+                    current_chunk = sub_chunks[-1] if sub_chunks else ""
+
+    if current_chunk:
+        chunks.append(current_chunk)
+
+    return chunks if chunks else ["-"]
+    
 
 # 신청 한 줄 포맷 함수
 def format_application_line(app: dict) -> str:
