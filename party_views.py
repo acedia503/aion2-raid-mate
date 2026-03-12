@@ -115,6 +115,7 @@ class PartyRuleSetupView(discord.ui.View):
     async def on_timeout(self) -> None:
         for item in self.children:
             item.disabled = True
+        self.stop()
 
     def current_slot_range(self) -> range:
         return range(1, 5) if self.page == 1 else range(5, 9)
@@ -365,6 +366,7 @@ class PartyReplaceView(discord.ui.View):
     async def on_timeout(self) -> None:
         for item in self.children:
             item.disabled = True
+        self.stop()
 
 
 # =========================================================
@@ -390,6 +392,7 @@ class PartyReplaceModeView(discord.ui.View):
     async def on_timeout(self) -> None:
         for item in self.children:
             item.disabled = True
+        self.stop()
 
     @discord.ui.button(label="교체", style=discord.ButtonStyle.primary)
     async def swap_button(self, interaction: discord.Interaction, button: discord.ui.Button):
