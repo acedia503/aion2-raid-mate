@@ -1,18 +1,11 @@
-# constants.py
-# 변하지 않는 설정값/선택지/맵핑
-
 from __future__ import annotations
 
 VALID_WEEKDAYS = {"월", "화", "수", "목", "금", "토", "일"}
+WEEKDAY_ORDER = ["월", "화", "수", "목", "금", "토", "일"]
 
 WEEKDAY_OPTIONS = [
-    {"name": "월", "value": "월"},
-    {"name": "화", "value": "화"},
-    {"name": "수", "value": "수"},
-    {"name": "목", "value": "목"},
-    {"name": "금", "value": "금"},
-    {"name": "토", "value": "토"},
-    {"name": "일", "value": "일"},
+    {"name": day, "value": day}
+    for day in WEEKDAY_ORDER
 ]
 
 RACE_OPTIONS = [
@@ -20,14 +13,20 @@ RACE_OPTIONS = [
     {"name": "마족", "code": "2"},
 ]
 
-SERVER_OPTIONS = [
-    {"name": "루", "code": "1001"},
-    {"name": "시엘", "code": "1002"},
-    {"name": "이스라펠", "code": "1003"},
-    {"name": "진", "code": "2019"},
-    {"name": "트리니엘", "code": "2020"},
-    {"name": "카이시넬", "code": "2021"},
-]
+SERVERS_BY_RACE: dict[str, list[dict[str, str]]] = {
+    "1": [
+        {"name": "루", "code": "1001"},
+        {"name": "시엘", "code": "1002"},
+        {"name": "이스라펠", "code": "1003"},
+    ],
+    "2": [
+        {"name": "진", "code": "2019"},
+        {"name": "트리니엘", "code": "2020"},
+        {"name": "카이시넬", "code": "2021"},
+    ],
+}
+
+SERVER_OPTIONS = [server for servers in SERVERS_BY_RACE.values() for server in servers]
 
 ROLE_OPTIONS = [
     {"label": "ALL", "value": "ALL"},
