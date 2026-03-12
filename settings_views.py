@@ -20,13 +20,19 @@ class GuildSettingView(discord.ui.View):
         self.server_select: ServerSelect | None = None
         self.add_item(self.race_select)
 
-    def refresh_server_select(self) -> None:
-        if self.server_select is not None:
-            self.remove_item(self.server_select)
-            self.server_select = None
+    def refresh_components(self) -> None:
+        for item in list(self.children):
+            if isinstance(item, (RaceSelect, ServerSelect)):
+                self.remove_item(item)
+    
+        self.race_select = RaceSelect(self)
+        self.add_item(self.race_select)
+    
         if self.selected_race_code:
             self.server_select = ServerSelect(self, self.selected_race_code)
             self.add_item(self.server_select)
+        else:
+            self.server_select = None
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.user_id:
@@ -60,22 +66,27 @@ class GuildSettingView(discord.ui.View):
 
 
 class RaceSelect(discord.ui.Select):
-    def __init__(self, parent_view: GuildSettingView):
+    def __init__(self, parent_view: "GuildSettingView"):
         self.parent_view = parent_view
-        options = [discord.SelectOption(label=race["name"], value=race["code"]) for race in RACE_OPTIONS]
-        super().__init__(placeholder="아이온2 종족을 선택하세요", min_values=1, max_values=1, options=options, row=0)
 
-    async def callback(self, interaction: discord.Interaction):
-        selected = next((r for r in RACE_OPTIONS if r["code"] == self.values[0]), None)
-        if selected is None:
-            await interaction.response.send_message("선택한 종족 정보를 찾을 수 없습니다.", ephemeral=True)
-            return
-        self.parent_view.selected_race_code = selected["code"]
-        self.parent_view.selected_race_name = selected["name"]
-        self.parent_view.selected_server_code = None
-        self.parent_view.selected_server_name = None
-        self.parent_view.refresh_server_select()
-        await interaction.response.edit_message(content=f"종족: **{selected['name']}** 선택됨\n이제 종족 서버를 선택하세요.", view=self.parent_view)
+        selected_code = parent_view.selected_race_code
+
+        options = [
+            discord.SelectOption(
+                label=race["name"],
+                value=race["code"],
+                default=(race["code"] == selected_code),
+            )
+            for race in RACE_OPTIONS
+        ]
+
+        super().__init__(
+            placeholder="아이온2 종족을 선택하세요",
+            min_values=1,
+            max_values=1,
+            options=options,
+            row=0,
+        )
 
 
 class ServerSelect(discord.ui.Select):
