@@ -1,142 +1,96 @@
-# bot.py
-# 디스코드 명령어 담당
+from __future__ import annotations
 
 import os
+
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from constants import VALID_WEEKDAYS, RACE_OPTIONS, SERVER_OPTIONS
-
-from app_helpers import is_admin
-
-from settings_views import (
-    GuildSettingView,
-    RaidDeleteConfirmView,
-)
-
+from app_helpers import format_days, is_admin
 from application_views import (
-    ApplicationRaceServerView,
-    WeekdayMultiSelectView,
     ApplicationCancelView,
+    ApplicationRaceServerView,
     ForceDeleteRaceServerView,
+    WeekdayMultiSelectView,
 )
-
-from party_views import (
-    PartyConfirmVisibilityView,
-    PartyRuleSetupView,
-    PartyReplaceModeView,
-    PartyReplaceView,
-)
-
-from ui_helpers import (
-    format_days,
-    group_applications_by_raid,
-    build_raid_application_embed,
-    build_cancel_result_text,
-    build_force_delete_result_text,
-    build_application_update_embed,
-    build_raid_result_embed,
-    format_raid_result_text,
-    build_party_check_embed,
-    format_party_check_text_for_weekday,
-    build_party_update_embed,
-    send_long_text_followup,
-)
-
+from atool import AtoolError, get_character_info
+from constants import RACE_OPTIONS, SERVER_OPTIONS, VALID_WEEKDAYS
 from party_helpers import (
-    find_matching_generated_members,
-    find_matching_generated_member,
     can_move_member_to_target,
-    find_first_empty_slot,
-    list_members_in_party,
-    group_party_rows_by_weekday,
     convert_rows_to_raid_structure,
+    find_first_empty_slot,
+    find_matching_generated_member,
+    find_matching_generated_members,
+    group_party_rows_by_weekday,
+    list_members_in_party,
     raid_has_same_user_after_swap,
     split_members_already_assigned_other_weekday,
 )
-
-from raid_logic import (
-    build_balanced_raids,
-    exclude_already_generated_characters,
-    flatten_raids_to_party_rows,
+from party_views import (
+    PartyConfirmVisibilityView,
+    PartyReplaceModeView,
+    PartyReplaceView,
+    PartyRuleSetupView,
 )
-
+from raid_logic import build_balanced_raids, exclude_already_generated_characters, flatten_raids_to_party_rows
+from settings_views import GuildSettingView, RaidDeleteConfirmView
 from storage import (
-    init_db,
-    get_guild_setting,
-    delete_guild_setting,
-    create_raid,
-    get_raid,
-    list_raids,
-    delete_raid,
-    raid_exists,
-    count_raid_applications,
-    delete_raid_applications,
     clear_raid_parties,
-    get_user_application,
-    get_application_by_character,
+    count_raid_applications,
     create_application,
-    list_user_applications,
-    list_applications_by_character_name,
+    create_raid,
     delete_application,
-    update_application,
+    delete_guild_setting,
+    delete_raid,
+    delete_raid_applications,
+    get_application_by_character,
+    get_guild_setting,
+    get_raid,
+    get_user_application,
+    has_party_rules,
+    init_db,
+    list_applications_by_character_name,
     list_raid_applications_by_weekday,
     list_raid_parties,
-    replace_raid_parties,
+    list_raids,
+    list_user_applications,
     load_party_rules,
+    raid_exists,
+    replace_raid_parties,
     save_party_rules,
-    has_party_rules,
-    update_party_member_position,
     swap_party_members_position,
-    list_other_weekday_assigned_members,
-    list_waiting_party_members,
+    update_application,
+    update_party_member_position,
+)
+from ui_helpers import (
+    build_application_update_embed,
+    build_cancel_result_text,
+    build_force_delete_result_text,
+    build_party_check_embed,
+    build_party_update_embed,
+    build_raid_application_embed,
+    build_raid_result_embed,
+    format_party_check_text_for_weekday,
+    format_raid_result_text,
+    group_applications_by_raid,
+    send_long_text_followup,
 )
 
-from atool import get_character_info, AtoolError
-
-
-# ========================================================
-# 슬래시 선택지 정의
-# ========================================================
-
-RACE_CHOICES = [
-    app_commands.Choice(name=item["name"], value=item["code"])
-    for item in RACE_OPTIONS
-]
-
-SERVER_CHOICES = [
-    app_commands.Choice(name=item["name"], value=item["code"])
-    for item in SERVER_OPTIONS
-]
-
+RACE_CHOICES = [app_commands.Choice(name=item["name"], value=item["code"]) for item in RACE_OPTIONS]
+SERVER_CHOICES = [app_commands.Choice(name=item["name"], value=item["code"]) for item in SERVER_OPTIONS]
 CONDITION_TYPE_CHOICES = [
     app_commands.Choice(name="템렙", value="item_level"),
     app_commands.Choice(name="아툴 점수", value="combat_score"),
 ]
-
 VIEW_OPTION_CHOICES = [
     app_commands.Choice(name="전체", value="전체"),
     app_commands.Choice(name="요일", value="요일"),
     app_commands.Choice(name="대기", value="대기"),
 ]
 
-# ========================================================
-# 공통 유틸 함수
-# ========================================================
 
-# 기본 슬롯 규칙 함수
 def build_default_all_slot_rules() -> list[dict]:
-    return [
-        {"slot_index": 1, "role_type": "ALL", "preferred_jobs": []},
-        {"slot_index": 2, "role_type": "ALL", "preferred_jobs": []},
-        {"slot_index": 3, "role_type": "ALL", "preferred_jobs": []},
-        {"slot_index": 4, "role_type": "ALL", "preferred_jobs": []},
-        {"slot_index": 5, "role_type": "ALL", "preferred_jobs": []},
-        {"slot_index": 6, "role_type": "ALL", "preferred_jobs": []},
-        {"slot_index": 7, "role_type": "ALL", "preferred_jobs": []},
-        {"slot_index": 8, "role_type": "ALL", "preferred_jobs": []},
-    ]
+    return [{"slot_index": i, "role_type": "ALL", "preferred_jobs": []} for i in range(1, 9)]
 
 
 def make_character_key(row: dict) -> tuple[str, str, str]:
@@ -147,2516 +101,606 @@ def make_character_key(row: dict) -> tuple[str, str, str]:
     )
 
 
-def split_candidates_for_weekday_display(
-    weekday_applications: list[dict],
-    all_party_rows: list[dict],
-    target_weekday: str,
-) -> tuple[list[dict], list[dict]]:
-    """
-    반환:
-    - waiting_candidates: 해당 요일 신청자 중 어디에도 ASSIGNED 안 된 인원
-    - assigned_other_weekday_candidates: 다른 요일에 ASSIGNED 된 인원
-    """
-    assigned_map: dict[tuple[str, str, str], str] = {}
-
-    for row in all_party_rows:
-        status = str(row.get("status", "")).strip()
-        if status != "ASSIGNED":
-            continue
-
-        key = make_character_key(row)
-        assigned_map[key] = str(row.get("weekday", "")).strip()
-
-    waiting_candidates: list[dict] = []
-    assigned_other_weekday_candidates: list[dict] = []
-
-    for app in weekday_applications:
-        key = make_character_key(app)
-        assigned_weekday = assigned_map.get(key)
-
-        if not assigned_weekday:
-            waiting_candidates.append(app)
-        elif assigned_weekday != target_weekday:
-            copied = dict(app)
-            copied["assigned_weekday"] = assigned_weekday
-            assigned_other_weekday_candidates.append(copied)
-
-    return waiting_candidates, assigned_other_weekday_candidates
+def find_generated_rows_for_target(generated_rows: list[dict], target: dict) -> list[dict]:
+    key = make_character_key(target)
+    return [row for row in generated_rows if make_character_key(row) == key]
 
 
-def format_waiting_only_text(
-    raid_name: str,
-    weekday: str,
-    waiting_members: list[dict],
-    assigned_other_weekday_members: list[dict],
-) -> str:
-    lines: list[str] = []
-    lines.append(f"[{raid_name}] {weekday} 대기 확인")
-    lines.append("")
-
-    lines.append("대기 인원")
-    if waiting_members:
-        for member in waiting_members:
-            lines.append(
-                f"  - {member.get('character_name', '-')} | "
-                f"{member.get('race_name', '-')} / {member.get('server_name', '-')} | "
-                f"{member.get('job_name', '-')} | "
-                f"{member.get('item_level', 0)} | "
-                f"{member.get('combat_score', 0)}"
-            )
-    else:
-        lines.append("  - 없음")
-
-    lines.append("")
-    lines.append("타 요일 배정 인원")
-    if assigned_other_weekday_members:
-        for member in assigned_other_weekday_members:
-            lines.append(
-                f"  - {member.get('character_name', '-')} | "
-                f"{member.get('race_name', '-')} / {member.get('server_name', '-')} | "
-                f"{member.get('job_name', '-')} | "
-                f"{member.get('item_level', 0)} | "
-                f"{member.get('combat_score', 0)} | "
-                f"배정 요일: {member.get('assigned_weekday', '-')}"
-            )
-    else:
-        lines.append("  - 없음")
-
-    lines.append("")
-    lines.append("※ 대기는 해당 요일 신청자 중 아직 어떤 요일 공대에도 배정되지 않은 인원만 의미합니다.")
-    return "\n".join(lines)
-
-
-def exclude_characters_assigned_on_other_weekdays(
-    candidates: list[dict],
-    all_party_rows: list[dict],
-    target_weekday: str,
-) -> tuple[list[dict], list[str]]:
-    assigned_other_weekdays: dict[tuple[str, str, str], str] = {}
-
-    for row in all_party_rows:
-        status = str(row.get("status", "")).strip()
-        weekday = str(row.get("weekday", "")).strip()
-
-        if status != "ASSIGNED":
-            continue
-        if weekday == target_weekday:
-            continue
-
-        key = make_character_key(row)
-        assigned_other_weekdays[key] = weekday
-
-    filtered: list[dict] = []
-    notices: list[str] = []
-
-    for candidate in candidates:
-        key = make_character_key(candidate)
-        other_weekday = assigned_other_weekdays.get(key)
-
-        if other_weekday:
-            notices.append(
-                f"타 요일 배정 제외: {candidate['character_name']} | {other_weekday}"
-            )
-            continue
-
-        filtered.append(candidate)
-
-    return filtered, notices
-
-
-def refresh_candidates_for_party_generation_optimized(
-    candidates: list[dict],
-) -> tuple[list[dict], list[str]]:
-    """
-    공대 생성 시점 기준 아툴 재조회.
-    - 같은 캐릭터 키는 1번만 재조회
-    - 결과를 map에 저장 후 재사용
-    """
+def refresh_candidates_for_party_generation_optimized(candidates: list[dict]) -> tuple[list[dict], list[str]]:
     refreshed_candidates: list[dict] = []
     warnings: list[str] = []
     refreshed_map: dict[tuple[str, str, str], dict] = {}
 
-    unique_targets: list[dict] = []
-    seen_keys: set[tuple[str, str, str]] = set()
-
     for candidate in candidates:
         key = make_character_key(candidate)
-        if key in seen_keys:
+        if key in refreshed_map:
+            refreshed_candidates.append(dict(refreshed_map[key]))
             continue
-        seen_keys.add(key)
-        unique_targets.append(candidate)
 
-    for candidate in unique_targets:
-        key = make_character_key(candidate)
         original_score = int(candidate.get("combat_score", 0))
         original_level = int(candidate.get("item_level", 0))
-
         refreshed = dict(candidate)
-
         try:
             data = get_character_info(
-                race_code=str(candidate["race_code"]),
-                race_name=str(candidate["race_name"]),
-                server_code=str(candidate["server_code"]),
-                server_name=str(candidate["server_name"]),
-                character_name=str(candidate["character_name"]),
+                race_code=candidate["race_code"],
+                race_name=candidate["race_name"],
+                server_code=candidate["server_code"],
+                server_name=candidate["server_name"],
+                character_name=candidate["character_name"],
             )
-
-            refreshed["character_name"] = data["nickname"]
-            refreshed["job_name"] = data["job_name"]
-            refreshed["item_level"] = data["item_level"]
-            refreshed["combat_score"] = data["combat_score"]
-            refreshed["peak_combat_score"] = data["peak_combat_score"]
-
-            if (
-                int(data["combat_score"]) != original_score
-                or int(data["item_level"]) != original_level
-            ):
+            refreshed.update(
+                {
+                    "character_name": data["nickname"],
+                    "job_name": data["job_name"],
+                    "item_level": data["item_level"],
+                    "combat_score": data["combat_score"],
+                    "peak_combat_score": data["peak_combat_score"],
+                }
+            )
+            if data["combat_score"] != original_score or data["item_level"] != original_level:
                 warnings.append(
-                    f"재조회 반영: {candidate['character_name']} | "
-                    f"템렙 {original_level}→{data['item_level']} | "
-                    f"아툴 {original_score}→{data['combat_score']}"
+                    f"재조회 반영: {candidate['character_name']} | 템렙 {original_level}→{data['item_level']} | 아툴 {original_score}→{data['combat_score']}"
                 )
-
-        except AtoolError as e:
-            warnings.append(
-                f"재조회 실패(기존값 유지): {candidate['character_name']} | {e}"
-            )
         except Exception as e:
-            warnings.append(
-                f"재조회 오류(기존값 유지): {candidate['character_name']} | {e}"
-            )
-
+            warnings.append(f"재조회 실패(기존값 유지): {candidate['character_name']} | {e}")
         refreshed_map[key] = refreshed
-
-    for candidate in candidates:
-        key = make_character_key(candidate)
-        refreshed_candidates.append(dict(refreshed_map.get(key, candidate)))
+        refreshed_candidates.append(dict(refreshed))
 
     return refreshed_candidates, warnings
 
 
-# ========================================================
-# 봇 생성
-# ========================================================
+def format_waiting_only_text(raid_name: str, weekday: str, waiting_members: list[dict], assigned_other_weekday_members: list[dict]) -> str:
+    lines = [f"[{raid_name}] {weekday} 대기 확인", "", "대기 인원"]
+    if waiting_members:
+        for member in waiting_members:
+            lines.append(
+                f"  - {member.get('character_name', '-')} | {member.get('race_name', '-')} / {member.get('server_name', '-')} | {member.get('job_name', '-')} | {member.get('item_level', 0)} | {member.get('combat_score', 0)}"
+            )
+    else:
+        lines.append("  - 없음")
+    lines.extend(["", "타 요일 배정 인원"])
+    if assigned_other_weekday_members:
+        for member in assigned_other_weekday_members:
+            lines.append(
+                f"  - {member.get('character_name', '-')} | {member.get('race_name', '-')} / {member.get('server_name', '-')} | 배정 요일: {member.get('assigned_weekday', '-')}"
+            )
+    else:
+        lines.append("  - 없음")
+    return "\n".join(lines)
+
 
 intents = discord.Intents.default()
+bot = commands.Bot(command_prefix="!", intents=intents)
 
-bot = commands.Bot(
-    command_prefix="!",
-    intents=intents
-)
-
-
-# =========================================================
-# /설정 명령어
-# =========================================================
-
-# 관리자만 가능
-# 같은 서버에서 다시 실행하면 수정
-# 서버당 1개 설정만 유지
 
 @bot.tree.command(name="설정", description="이 디스코드 서버의 기본 아이온2 종족/서버를 설정합니다.")
 async def set_default_aion2(interaction: discord.Interaction):
-    if interaction.guild is None:
-        await interaction.response.send_message(
-            "서버 안에서만 사용할 수 있는 명령어입니다.",
-            ephemeral=True,
-        )
+    if interaction.guild is None or not is_admin(interaction):
+        await interaction.response.send_message("관리자만 서버 안에서 사용할 수 있습니다.", ephemeral=True)
         return
-
-    if not is_admin(interaction):
-        await interaction.response.send_message(
-            "관리자만 사용할 수 있는 명령어입니다.",
-            ephemeral=True,
-        )
-        return
-
-    view = GuildSettingView(
-        guild_id=interaction.guild.id,
-        user_id=interaction.user.id,
-    )
-
     await interaction.response.send_message(
         "아이온2 기본 설정을 진행합니다.\n먼저 종족을 선택하세요.",
-        view=view,
+        view=GuildSettingView(interaction.guild.id, interaction.user.id),
         ephemeral=True,
     )
 
 
-# =========================================================
-# /설정확인 명령어
-# =========================================================
-
-# 관리자만 가능
-# 현재 서버 설정이 있으면 보여주고, 없으면 없다고 안내.
-
 @bot.tree.command(name="설정확인", description="이 디스코드 서버의 현재 기본 설정을 확인합니다.")
 async def check_default_aion2(interaction: discord.Interaction):
-    if interaction.guild is None:
-        await interaction.response.send_message(
-            "서버 안에서만 사용할 수 있는 명령어입니다.",
-            ephemeral=True,
-        )
+    if interaction.guild is None or not is_admin(interaction):
+        await interaction.response.send_message("관리자만 서버 안에서 사용할 수 있습니다.", ephemeral=True)
         return
-
-    if not is_admin(interaction):
-        await interaction.response.send_message(
-            "관리자만 사용할 수 있는 명령어입니다.",
-            ephemeral=True,
-        )
+    setting = get_guild_setting(interaction.guild.id)
+    if setting is None:
+        await interaction.response.send_message("이 서버에는 저장된 기본 설정이 없습니다.", ephemeral=True)
         return
+    embed = discord.Embed(title="현재 서버 기본 설정", color=discord.Color.blue())
+    embed.add_field(name="종족", value=setting["race_name"], inline=True)
+    embed.add_field(name="종족서버", value=setting["server_name"], inline=True)
+    embed.add_field(name="수정자 ID", value=str(setting["updated_by"]), inline=False)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    try:
-        setting = get_guild_setting(interaction.guild.id)
-
-        if setting is None:
-            await interaction.response.send_message(
-                "이 서버에는 저장된 기본 설정이 없습니다.",
-                ephemeral=True,
-            )
-            return
-
-        embed = discord.Embed(
-            title="현재 서버 기본 설정",
-            color=discord.Color.blue(),
-        )
-        embed.add_field(name="종족", value=setting["race_name"], inline=True)
-        embed.add_field(name="종족서버", value=setting["server_name"], inline=True)
-        embed.add_field(name="수정자 ID", value=str(setting["updated_by"]), inline=False)
-        embed.set_footer(text=f"수정 시각: {setting['updated_at']}")
-
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-    except Exception as e:
-        await interaction.response.send_message(
-            f"설정 확인 중 오류가 발생했습니다.\n`{e}`",
-            ephemeral=True,
-        )
-
-
-# =========================================================
-# /설정삭제 명령어
-# =========================================================
-
-# 관리자만 가능
-# 현재 서버의 기본 설정 삭제
-# 기존 신청 DB나 공대 DB는 영향 없게 설계
 
 @bot.tree.command(name="설정삭제", description="이 디스코드 서버의 기본 설정을 삭제합니다.")
 async def delete_default_aion2(interaction: discord.Interaction):
-    if interaction.guild is None:
-        await interaction.response.send_message(
-            "서버 안에서만 사용할 수 있는 명령어입니다.",
-            ephemeral=True,
-        )
+    if interaction.guild is None or not is_admin(interaction):
+        await interaction.response.send_message("관리자만 서버 안에서 사용할 수 있습니다.", ephemeral=True)
         return
-
-    if not is_admin(interaction):
-        await interaction.response.send_message(
-            "관리자만 사용할 수 있는 명령어입니다.",
-            ephemeral=True,
-        )
+    deleted = delete_guild_setting(interaction.guild.id)
+    if deleted == 0:
+        await interaction.response.send_message("삭제할 기본 설정이 없습니다.", ephemeral=True)
         return
+    await interaction.response.send_message("이 서버의 기본 설정이 삭제되었습니다.", ephemeral=True)
 
-    try:
-        deleted = delete_guild_setting(interaction.guild.id)
-
-        if deleted == 0:
-            await interaction.response.send_message(
-                "삭제할 기본 설정이 없습니다.",
-                ephemeral=True,
-            )
-            return
-
-        await interaction.response.send_message(
-            "이 서버의 기본 설정이 삭제되었습니다.\n"
-            "기존 신청 내역과 공대 생성 내역은 유지됩니다.",
-            ephemeral=True,
-        )
-    except Exception as e:
-        await interaction.response.send_message(
-            f"설정 삭제 중 오류가 발생했습니다.\n`{e}`",
-            ephemeral=True,
-        )
-
-
-# =========================================================
-# /레이드생성 명령어
-# =========================================================
-
-# 관리자만 가능
-# 동일 이름의 레이드 생성 불가
 
 @bot.tree.command(name="레이드생성", description="이 서버에 레이드를 생성합니다.")
-@app_commands.describe(
-    레이드이름="생성할 레이드 이름",
-    입장조건종류="입장조건 종류",
-    입장조건값="입장조건 값",
-)
 @app_commands.choices(입장조건종류=CONDITION_TYPE_CHOICES)
-async def create_raid_command(
-    interaction: discord.Interaction,
-    레이드이름: str,
-    입장조건종류: app_commands.Choice[str],
-    입장조건값: int,
-):
-    if interaction.guild is None:
-        await interaction.response.send_message(
-            "서버 안에서만 사용할 수 있는 명령어입니다.",
-            ephemeral=True,
-        )
+async def create_raid_command(interaction: discord.Interaction, 레이드이름: str, 입장조건종류: app_commands.Choice[str], 입장조건값: int):
+    if interaction.guild is None or not is_admin(interaction):
+        await interaction.response.send_message("관리자만 서버 안에서 사용할 수 있습니다.", ephemeral=True)
         return
-
-    if not is_admin(interaction):
-        await interaction.response.send_message(
-            "관리자만 사용할 수 있는 명령어입니다.",
-            ephemeral=True,
-        )
+    if raid_exists(interaction.guild.id, 레이드이름):
+        await interaction.response.send_message(f"이 서버에는 이미 `{레이드이름}` 레이드가 존재합니다.", ephemeral=True)
         return
+    create_raid(interaction.guild.id, 레이드이름.strip(), 입장조건종류.value, 입장조건값, interaction.user.id)
+    await interaction.response.send_message(f"`{레이드이름}` 레이드가 생성되었습니다.", ephemeral=True)
 
-    레이드이름 = 레이드이름.strip()
-    if not 레이드이름:
-        await interaction.response.send_message(
-            "레이드 이름이 비어 있습니다.",
-            ephemeral=True,
-        )
-        return
-
-    if 입장조건값 < 0:
-        await interaction.response.send_message(
-            "입장조건 값은 0 이상이어야 합니다.",
-            ephemeral=True,
-        )
-        return
-
-    try:
-        if raid_exists(interaction.guild.id, 레이드이름):
-            await interaction.response.send_message(
-                f"이 서버에는 이미 `{레이드이름}` 레이드가 존재합니다.",
-                ephemeral=True,
-            )
-            return
-
-        create_raid(
-            guild_id=interaction.guild.id,
-            raid_name=레이드이름,
-            condition_type=입장조건종류.value,
-            condition_value=입장조건값,
-            created_by=interaction.user.id,
-        )
-
-        condition_label = "템렙" if 입장조건종류.value == "item_level" else "아툴 점수"
-
-        embed = discord.Embed(
-            title="레이드 생성 완료",
-            color=discord.Color.green(),
-        )
-        embed.add_field(name="레이드 이름", value=레이드이름, inline=False)
-        embed.add_field(name="입장 조건", value=f"{condition_label} {입장조건값}", inline=False)
-
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-
-    except Exception as e:
-        await interaction.response.send_message(
-            f"레이드 생성 중 오류가 발생했습니다.\n`{e}`",
-            ephemeral=True,
-        )
-
-# =========================================================
-# /레이드확인
-# =========================================================
-
-# 관리자만 가능
-# 현재 서버 레이드 목록 + 입장조건 + 신청자 수
 
 @bot.tree.command(name="레이드확인", description="이 서버에 저장된 레이드 목록을 확인합니다.")
 async def list_raids_command(interaction: discord.Interaction):
-    if interaction.guild is None:
-        await interaction.response.send_message(
-            "서버 안에서만 사용할 수 있는 명령어입니다.",
-            ephemeral=True,
-        )
+    if interaction.guild is None or not is_admin(interaction):
+        await interaction.response.send_message("관리자만 서버 안에서 사용할 수 있습니다.", ephemeral=True)
         return
-
-    if not is_admin(interaction):
-        await interaction.response.send_message(
-            "관리자만 사용할 수 있는 명령어입니다.",
-            ephemeral=True,
-        )
+    raids = list_raids(interaction.guild.id)
+    if not raids:
+        await interaction.response.send_message("이 서버에는 생성된 레이드가 없습니다.", ephemeral=True)
         return
+    embed = discord.Embed(title="현재 서버 레이드 목록", color=discord.Color.blue())
+    for raid in raids:
+        label = "템렙" if raid["condition_type"] == "item_level" else "아툴 점수"
+        applicant_count = count_raid_applications(interaction.guild.id, raid["raid_name"])
+        embed.add_field(name=raid["raid_name"], value=f"입장 조건: {label} {raid['condition_value']}\n신청자 수: {applicant_count}명", inline=False)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    try:
-        raids = list_raids(interaction.guild.id)
-
-        if not raids:
-            await interaction.response.send_message(
-                "이 서버에는 생성된 레이드가 없습니다.",
-                ephemeral=True,
-            )
-            return
-
-        embed = discord.Embed(
-            title="현재 서버 레이드 목록",
-            color=discord.Color.blue(),
-        )
-
-        for raid in raids:
-            raid_name = raid["raid_name"]
-            condition_type = raid["condition_type"]
-            condition_value = raid["condition_value"]
-            applicant_count = count_raid_applications(interaction.guild.id, raid_name)
-
-            condition_label = "템렙" if condition_type == "item_level" else "아툴 점수"
-
-            embed.add_field(
-                name=raid_name,
-                value=(
-                    f"입장 조건: {condition_label} {condition_value}\n"
-                    f"신청자 수: {applicant_count}명"
-                ),
-                inline=False,
-            )
-
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-
-    except Exception as e:
-        await interaction.response.send_message(
-            f"레이드 확인 중 오류가 발생했습니다.\n`{e}`",
-            ephemeral=True,
-        )
-
-
-# =========================================================
-# /레이드삭제
-# =========================================================
-
-# 관리자만 가능
-# 레이드 존재 확인
-# 신청자 수 확인
-# 신청자 없으면 바로 삭제
-# 신청자 있으면 UI로 물어봄
-# “신청자까지 같이 삭제” 선택 시: applications 삭제, raid_parties 삭제, raids 삭제
 
 @bot.tree.command(name="레이드삭제", description="이 서버의 레이드를 삭제합니다.")
-@app_commands.describe(레이드이름="삭제할 레이드 이름")
 async def delete_raid_command(interaction: discord.Interaction, 레이드이름: str):
-    if interaction.guild is None:
-        await interaction.response.send_message(
-            "서버 안에서만 사용할 수 있는 명령어입니다.",
-            ephemeral=True,
-        )
+    if interaction.guild is None or not is_admin(interaction):
+        await interaction.response.send_message("관리자만 서버 안에서 사용할 수 있습니다.", ephemeral=True)
         return
-
-    if not is_admin(interaction):
-        await interaction.response.send_message(
-            "관리자만 사용할 수 있는 명령어입니다.",
-            ephemeral=True,
-        )
+    if get_raid(interaction.guild.id, 레이드이름) is None:
+        await interaction.response.send_message(f"`{레이드이름}` 레이드는 존재하지 않습니다.", ephemeral=True)
         return
-
-    레이드이름 = 레이드이름.strip()
-    if not 레이드이름:
-        await interaction.response.send_message(
-            "레이드 이름이 비어 있습니다.",
-            ephemeral=True,
-        )
+    applicant_count = count_raid_applications(interaction.guild.id, 레이드이름)
+    if applicant_count == 0:
+        delete_raid(interaction.guild.id, 레이드이름)
+        await interaction.response.send_message(f"`{레이드이름}` 레이드가 삭제되었습니다.", ephemeral=True)
         return
+    view = RaidDeleteConfirmView(interaction.guild.id, 레이드이름, interaction.user.id)
+    await interaction.response.send_message("신청 내역과 공대 내역까지 같이 삭제하시겠습니까?", view=view, ephemeral=True)
+    timeout = await view.wait()
+    if timeout or view.value != "delete_with_applications":
+        return
+    delete_raid_applications(interaction.guild.id, 레이드이름)
+    clear_raid_parties(interaction.guild.id, 레이드이름)
+    delete_raid(interaction.guild.id, 레이드이름)
+    await interaction.followup.send(f"`{레이드이름}` 레이드가 전체 삭제되었습니다.", ephemeral=True)
 
-    try:
-        raid = get_raid(interaction.guild.id, 레이드이름)
-        if raid is None:
-            await interaction.response.send_message(
-                f"`{레이드이름}` 레이드는 존재하지 않습니다.",
-                ephemeral=True,
-            )
-            return
-
-        applicant_count = count_raid_applications(interaction.guild.id, 레이드이름)
-
-        if applicant_count == 0:
-            deleted = delete_raid(interaction.guild.id, 레이드이름)
-            if deleted:
-                await interaction.response.send_message(
-                    f"`{레이드이름}` 레이드가 삭제되었습니다.",
-                    ephemeral=True,
-                )
-            else:
-                await interaction.response.send_message(
-                    "레이드 삭제에 실패했습니다.",
-                    ephemeral=True,
-                )
-            return
-
-        view = RaidDeleteConfirmView(
-            guild_id=interaction.guild.id,
-            raid_name=레이드이름,
-            user_id=interaction.user.id,
-        )
-
-        await interaction.response.send_message(
-            f"`{레이드이름}` 레이드에는 현재 신청자 {applicant_count}명이 있습니다.\n"
-            "신청자 목록과 생성된 공대 내역까지 같이 삭제하시겠습니까?",
-            view=view,
-            ephemeral=True,
-        )
-
-        timeout = await view.wait()
-        if timeout:
-            return
-
-        if view.value == "cancel":
-            return
-
-        if view.value == "delete_with_applications":
-            deleted_applications = delete_raid_applications(interaction.guild.id, 레이드이름)
-            deleted_parties = clear_raid_parties(interaction.guild.id, 레이드이름)
-            deleted_raid = delete_raid(interaction.guild.id, 레이드이름)
-
-            if deleted_raid:
-                await interaction.followup.send(
-                    f"`{레이드이름}` 레이드 삭제 완료\n"
-                    f"- 신청 삭제: {deleted_applications}건\n"
-                    f"- 공대 내역 삭제: {deleted_parties}건",
-                    ephemeral=True,
-                )
-            else:
-                await interaction.followup.send(
-                    "레이드 삭제 중 오류가 발생했습니다.",
-                    ephemeral=True,
-                )
-
-    except Exception as e:
-        if interaction.response.is_done():
-            await interaction.followup.send(
-                f"레이드 삭제 중 오류가 발생했습니다.\n`{e}`",
-                ephemeral=True,
-            )
-        else:
-            await interaction.response.send_message(
-                f"레이드 삭제 중 오류가 발생했습니다.\n`{e}`",
-                ephemeral=True,
-            )
-
-# =========================================================
-# /아툴
-# =========================================================
-
-# 1) 종족/서버 둘 다 안 넣음
-# 현재 디스코드 서버의 guild_settings 사용
-# 설정이 없으면 안내 메시지 출력
-
-# 2) 종족/서버 둘 다 넣음
-# 입력한 값으로 직접 조회
-
-# 3) 둘 중 하나만 넣음
-# 에러 메시지 출력
 
 @bot.tree.command(name="아툴", description="아이온2 캐릭터 아툴 정보를 조회합니다.")
-@app_commands.describe(
-    캐릭터명="조회할 캐릭터 이름",
-    종족="직접 지정할 종족 (선택)",
-    종족서버="직접 지정할 종족 서버 (선택)",
-)
 @app_commands.choices(종족=RACE_CHOICES, 종족서버=SERVER_CHOICES)
-async def search_atool(
-    interaction: discord.Interaction,
-    캐릭터명: str,
-    종족: app_commands.Choice[str] | None = None,
-    종족서버: app_commands.Choice[str] | None = None,
-):
+async def search_atool(interaction: discord.Interaction, 캐릭터명: str, 종족: app_commands.Choice[str] | None = None, 종족서버: app_commands.Choice[str] | None = None):
     if interaction.guild is None:
-        await interaction.response.send_message(
-            "서버 안에서만 사용할 수 있는 명령어입니다.",
-            ephemeral=True,
-        )
+        await interaction.response.send_message("서버 안에서만 사용할 수 있습니다.", ephemeral=True)
         return
-
-    캐릭터명 = 캐릭터명.strip()
-    if not 캐릭터명:
-        await interaction.response.send_message(
-            "캐릭터명이 비어 있습니다.",
-            ephemeral=True,
-        )
-        return
-
-    # 둘 중 하나만 입력한 경우 에러
     if (종족 is None) != (종족서버 is None):
-        await interaction.response.send_message(
-            "종족과 종족서버는 둘 다 입력하거나, 둘 다 입력하지 않아야 합니다.",
-            ephemeral=True,
-        )
+        await interaction.response.send_message("종족과 종족서버는 둘 다 입력하거나 둘 다 비워야 합니다.", ephemeral=True)
         return
-
-    await interaction.response.defer(ephemeral=True, thinking=True)
-
+    await interaction.response.defer(ephemeral=True)
     try:
-        # 1) 직접 입력한 경우
-        if 종족 is not None and 종족서버 is not None:
-            race_code = str(종족.value)
-            race_name = str(종족.name)
-            server_code = str(종족서버.value)
-            server_name = str(종족서버.name)
-
-        # 2) 직접 입력이 없으면 guild 기본 설정 사용
+        if 종족 and 종족서버:
+            race_code, race_name = 종족.value, 종족.name
+            server_code, server_name = 종족서버.value, 종족서버.name
         else:
             setting = get_guild_setting(interaction.guild.id)
             if setting is None:
-                await interaction.followup.send(
-                    "이 서버에는 기본 종족/서버 설정이 없습니다.\n"
-                    "관리자가 `/설정`을 먼저 해두었거나, `/아툴`에서 종족과 종족서버를 직접 모두 입력해야 합니다.",
-                    ephemeral=True,
-                )
+                await interaction.followup.send("기본 설정이 없어서 조회할 수 없습니다. `/설정`을 먼저 사용하세요.", ephemeral=True)
                 return
-
-            race_code = str(setting["race_code"])
-            race_name = str(setting["race_name"])
-            server_code = str(setting["server_code"])
-            server_name = str(setting["server_name"])
-
-        data = get_character_info(
-            race_code=race_code,
-            race_name=race_name,
-            server_code=server_code,
-            server_name=server_name,
-            character_name=캐릭터명,
-        )
-
-        embed = discord.Embed(
-            title=f"{data['nickname']} 아툴 조회",
-            color=discord.Color.blue(),
-        )
+            race_code, race_name = setting["race_code"], setting["race_name"]
+            server_code, server_name = setting["server_code"], setting["server_name"]
+        data = get_character_info(race_code, race_name, server_code, server_name, 캐릭터명.strip())
+        embed = discord.Embed(title=f"{data['nickname']} 아툴 조회", color=discord.Color.blue())
         embed.add_field(name="종족", value=data["race_name"], inline=False)
         embed.add_field(name="종족서버", value=data["server_name"], inline=False)
         embed.add_field(name="직업", value=data["job_name"], inline=False)
         embed.add_field(name="템렙", value=str(data["item_level"]), inline=False)
         embed.add_field(name="아툴 점수", value=str(data["combat_score"]), inline=False)
         embed.add_field(name="최고 아툴 점수", value=str(data["peak_combat_score"]), inline=False)
-
         await interaction.followup.send(embed=embed, ephemeral=True)
-
-    except AtoolError as e:
-        await interaction.followup.send(
-            f"아툴 조회 실패: {e}",
-            ephemeral=True,
-        )
     except Exception as e:
-        await interaction.followup.send(
-            f"아툴 조회 중 오류가 발생했습니다.\n`{e}`",
-            ephemeral=True,
-        )
+        await interaction.followup.send(f"아툴 조회 실패: {e}", ephemeral=True)
 
-
-# =========================================================
-# /신청 명령어
-# =========================================================
 
 @bot.tree.command(name="신청", description="레이드 신청")
-@app_commands.describe(
-    레이드이름="신청할 레이드 이름",
-    캐릭터명="아툴에서 조회할 캐릭터명",
-)
-async def apply_raid(
-    interaction: discord.Interaction,
-    레이드이름: str,
-    캐릭터명: str,
-):
+async def apply_raid(interaction: discord.Interaction, 레이드이름: str, 캐릭터명: str):
     if interaction.guild is None:
-        await interaction.response.send_message(
-            "서버 안에서만 사용할 수 있는 명령어입니다.",
-            ephemeral=True,
-        )
+        await interaction.response.send_message("서버 안에서만 사용할 수 있습니다.", ephemeral=True)
         return
-
-    레이드이름 = 레이드이름.strip()
-    캐릭터명 = 캐릭터명.strip()
-
-    if not 레이드이름:
-        await interaction.response.send_message(
-            "레이드 이름이 비어 있습니다.",
-            ephemeral=True,
-        )
+    await interaction.response.defer(ephemeral=True)
+    raid = get_raid(interaction.guild.id, 레이드이름.strip())
+    if raid is None:
+        await interaction.followup.send(f"`{레이드이름}` 레이드는 존재하지 않습니다.", ephemeral=True)
         return
-
-    if not 캐릭터명:
-        await interaction.response.send_message(
-            "캐릭터명이 비어 있습니다.",
-            ephemeral=True,
-        )
+    guild_setting = get_guild_setting(interaction.guild.id)
+    used_default_setting = guild_setting is not None
+    if guild_setting is None:
+        race_server_view = ApplicationRaceServerView(interaction.user.id)
+        await interaction.followup.send("신청에 사용할 종족과 종족 서버를 선택하세요.", view=race_server_view, ephemeral=True)
+        timeout = await race_server_view.wait()
+        if timeout or race_server_view.value != "submit":
+            return
+        race_code, race_name = race_server_view.selected_race_code, race_server_view.selected_race_name
+        server_code, server_name = race_server_view.selected_server_code, race_server_view.selected_server_name
+    else:
+        race_code, race_name = guild_setting["race_code"], guild_setting["race_name"]
+        server_code, server_name = guild_setting["server_code"], guild_setting["server_name"]
+    existing = get_application_by_character(interaction.guild.id, 레이드이름, race_code, server_code, 캐릭터명)
+    if existing is not None:
+        await interaction.followup.send("이미 신청된 캐릭터입니다.", ephemeral=True)
         return
+    data = get_character_info(race_code, race_name, server_code, server_name, 캐릭터명)
+    current_value = data["item_level"] if raid["condition_type"] == "item_level" else data["combat_score"]
+    if current_value < int(raid["condition_value"]):
+        await interaction.followup.send("입장 조건을 만족하지 않습니다.", ephemeral=True)
+        return
+    weekday_view = WeekdayMultiSelectView(interaction.user.id)
+    await interaction.followup.send(f"`{캐릭터명}` 신청을 진행합니다. 가능 요일을 선택하세요.", view=weekday_view, ephemeral=True)
+    timeout = await weekday_view.wait()
+    if timeout or weekday_view.value != "submit":
+        return
+    create_application(
+        {
+            "guild_id": interaction.guild.id,
+            "user_id": interaction.user.id,
+            "user_name": interaction.user.display_name,
+            "raid_name": 레이드이름,
+            "race_code": race_code,
+            "race_name": race_name,
+            "server_code": server_code,
+            "server_name": server_name,
+            "character_name": data["nickname"],
+            "job_name": data["job_name"],
+            "item_level": data["item_level"],
+            "combat_score": data["combat_score"],
+            "peak_combat_score": data["peak_combat_score"],
+            "available_days": weekday_view.selected_days,
+            "note": weekday_view.note,
+        }
+    )
+    embed = discord.Embed(title=f"[{레이드이름}] 신청 완료", color=discord.Color.green())
+    embed.add_field(name="캐릭터명", value=data["nickname"], inline=False)
+    if not used_default_setting:
+        embed.add_field(name="종족/종족서버", value=f"{race_name} / {server_name}", inline=False)
+    embed.add_field(name="직업", value=data["job_name"], inline=False)
+    embed.add_field(name="템렙", value=str(data["item_level"]), inline=False)
+    embed.add_field(name="아툴 점수", value=str(data["combat_score"]), inline=False)
+    embed.add_field(name="가능 요일", value=format_days(weekday_view.selected_days), inline=False)
+    if weekday_view.note:
+        embed.add_field(name="특이사항", value=weekday_view.note, inline=False)
+    await interaction.followup.send(embed=embed, ephemeral=False)
+    await interaction.followup.send("신청이 저장되었습니다.", ephemeral=True)
 
-    await interaction.response.defer(ephemeral=True, thinking=True)
-
-    try:
-        # 1) 레이드 존재 확인
-        raid = get_raid(interaction.guild.id, 레이드이름)
-        if raid is None:
-            await interaction.followup.send(
-                f"`{레이드이름}` 레이드는 존재하지 않습니다.",
-                ephemeral=True,
-            )
-            return
-
-        # 2) guild 기본 설정 확인
-        guild_setting = get_guild_setting(interaction.guild.id)
-
-        if guild_setting is not None:
-            race_code = str(guild_setting["race_code"])
-            race_name = str(guild_setting["race_name"])
-            server_code = str(guild_setting["server_code"])
-            server_name = str(guild_setting["server_name"])
-            used_default_setting = True
-        else:
-            used_default_setting = False
-
-            race_server_view = ApplicationRaceServerView(user_id=interaction.user.id)
-            await interaction.followup.send(
-                "이 서버에는 기본 종족/서버 설정이 없습니다.\n"
-                "신청에 사용할 종족과 종족 서버를 선택하세요.",
-                view=race_server_view,
-                ephemeral=True,
-            )
-
-            timeout = await race_server_view.wait()
-            if timeout:
-                await interaction.followup.send(
-                    "종족/종족 서버 선택 시간이 초과되었습니다.",
-                    ephemeral=True,
-                )
-                return
-
-            if race_server_view.value != "submit":
-                return
-
-            race_code = str(race_server_view.selected_race_code)
-            race_name = str(race_server_view.selected_race_name)
-            server_code = str(race_server_view.selected_server_code)
-            server_name = str(race_server_view.selected_server_name)
-
-        # 3) 중복 신청 확인
-        existing = get_application_by_character(
-            guild_id=interaction.guild.id,
-            raid_name=레이드이름,
-            race_code=race_code,
-            server_code=server_code,
-            character_name=캐릭터명,
-        )
-        if existing is not None:
-            await interaction.followup.send(
-                f"`{레이드이름}` 레이드에는 이미 `{캐릭터명}` 캐릭터가 신청되어 있습니다.",
-                ephemeral=True,
-            )
-            return
-
-        # 4) 아툴 조회
-        data = get_character_info(
-            race_code=race_code,
-            race_name=race_name,
-            server_code=server_code,
-            server_name=server_name,
-            character_name=캐릭터명,
-        )
-
-        # 5) 입장 조건 검사
-        condition_type = str(raid["condition_type"])
-        condition_value = int(raid["condition_value"])
-
-        if condition_type == "item_level":
-            current_value = int(data["item_level"])
-            condition_label = "템렙"
-        else:
-            current_value = int(data["combat_score"])
-            condition_label = "아툴 점수"
-
-        if current_value < condition_value:
-            await interaction.followup.send(
-                f"신청 불가: `{레이드이름}` 레이드의 입장 조건은 "
-                f"`{condition_label} {condition_value}` 이상입니다.\n"
-                f"현재 캐릭터 수치: `{current_value}`",
-                ephemeral=True,
-            )
-            return
-
-        # 6) 가능 요일 / 특이사항 입력
-        weekday_view = WeekdayMultiSelectView(user_id=interaction.user.id)
-
-        await interaction.followup.send(
-            f"`{캐릭터명}` 신청을 진행합니다.\n"
-            "가능 요일을 선택하세요.",
-            view=weekday_view,
-            ephemeral=True,
-        )
-
-        timeout = await weekday_view.wait()
-        if timeout:
-            await interaction.followup.send(
-                "가능 요일 입력 시간이 초과되었습니다.",
-                ephemeral=True,
-            )
-            return
-
-        if weekday_view.value not in ("submit", "submit_with_note"):
-            return
-
-        available_days = weekday_view.selected_days
-        note = weekday_view.note
-
-        # 7) DB 저장
-        create_application(
-            {
-                "guild_id": interaction.guild.id,
-                "user_id": interaction.user.id,
-                "user_name": interaction.user.display_name,
-                "raid_name": 레이드이름,
-                "race_code": race_code,
-                "race_name": race_name,
-                "server_code": server_code,
-                "server_name": server_name,
-                "character_name": data["nickname"],
-                "job_name": data["job_name"],
-                "item_level": data["item_level"],
-                "combat_score": data["combat_score"],
-                "peak_combat_score": data["peak_combat_score"],
-                "available_days": available_days,
-                "note": note,
-            }
-        )
-
-        # 8) 공개 신청 완료 메시지
-        embed = discord.Embed(
-            title=f"[{레이드이름}] 신청 완료",
-            color=discord.Color.green(),
-        )
-        embed.add_field(name="캐릭터명", value=data["nickname"], inline=False)
-
-        # 관리자 기본 설정이 없었을 때만 종족/서버 표시
-        if not used_default_setting:
-            embed.add_field(
-                name="종족/종족서버",
-                value=f"{race_name} / {server_name}",
-                inline=False,
-            )
-
-        embed.add_field(name="직업", value=data["job_name"], inline=False)
-        embed.add_field(name="템렙", value=str(data["item_level"]), inline=False)
-        embed.add_field(name="아툴 점수", value=str(data["combat_score"]), inline=False)
-        embed.add_field(name="가능 요일", value=format_days(available_days), inline=False)
-
-        if note:
-            embed.add_field(name="특이사항", value=note, inline=False)
-
-        await interaction.followup.send(embed=embed, ephemeral=False)
-
-        await interaction.followup.send(
-            "신청이 저장되었습니다.",
-            ephemeral=True,
-        )
-
-    except AtoolError as e:
-        await interaction.followup.send(
-            f"아툴 조회 실패: {e}",
-            ephemeral=True,
-        )
-    except Exception as e:
-        await interaction.followup.send(
-            f"신청 처리 중 오류가 발생했습니다.\n`{e}`",
-            ephemeral=True,
-        )
-
-
-# =========================================================
-# /신청확인
-# =========================================================
 
 @bot.tree.command(name="신청확인", description="내 레이드 신청 내역을 확인합니다.")
-@app_commands.describe(
-    레이드이름="확인할 레이드 이름 (선택)",
-)
-async def check_my_applications(
-    interaction: discord.Interaction,
-    레이드이름: str | None = None,
-):
-
+async def check_my_applications(interaction: discord.Interaction, 레이드이름: str | None = None):
     if interaction.guild is None:
-        await interaction.response.send_message(
-            "서버 안에서만 사용할 수 있는 명령어입니다.",
-            ephemeral=True,
-        )
+        await interaction.response.send_message("서버 안에서만 사용할 수 있습니다.", ephemeral=True)
         return
-
     await interaction.response.defer(ephemeral=True)
+    apps = list_user_applications(interaction.guild.id, interaction.user.id, 레이드이름.strip() if 레이드이름 else None)
+    if not apps:
+        await interaction.followup.send("신청 내역이 없습니다.", ephemeral=True)
+        return
+    grouped = group_applications_by_raid(apps)
+    for raid_name, items in grouped.items():
+        await interaction.followup.send(embed=build_raid_application_embed(raid_name, items), ephemeral=True)
 
-    try:
-        raid_name = 레이드이름.strip() if 레이드이름 else None
-
-        applications = list_user_applications(
-            guild_id=interaction.guild.id,
-            user_id=interaction.user.id,
-            raid_name=raid_name,
-        )
-
-        if not applications:
-            if raid_name:
-                await interaction.followup.send(
-                    f"`{raid_name}` 레이드 신청 내역이 없습니다.",
-                    ephemeral=True,
-                )
-            else:
-                await interaction.followup.send(
-                    "신청한 레이드 내역이 없습니다.",
-                    ephemeral=True,
-                )
-            return
-
-        grouped = group_applications_by_raid(applications)
-
-        await interaction.followup.send(
-            f"신청 내역 {len(applications)}건입니다.",
-            ephemeral=True,
-        )
-
-        for raid_name, apps in grouped.items():
-            embed = build_raid_application_embed(raid_name, apps)
-            await interaction.followup.send(embed=embed, ephemeral=True)
-
-    except Exception as e:
-        await interaction.followup.send(
-            f"신청 확인 중 오류가 발생했습니다.\n`{e}`",
-            ephemeral=True,
-        )
-
-
-# =========================================================
-# /신청취소
-# =========================================================
 
 @bot.tree.command(name="신청취소", description="내 레이드 신청을 취소합니다.")
-@app_commands.describe(
-    레이드이름="취소할 레이드 이름",
-    캐릭터명="취소할 캐릭터명",
-)
-async def cancel_application_command(
-    interaction: discord.Interaction,
-    레이드이름: str,
-    캐릭터명: str,
-):
+async def cancel_application_command(interaction: discord.Interaction, 레이드이름: str, 캐릭터명: str):
     if interaction.guild is None:
-        await interaction.response.send_message(
-            "서버 안에서만 사용할 수 있는 명령어입니다.",
-            ephemeral=True,
-        )
+        await interaction.response.send_message("서버 안에서만 사용할 수 있습니다.", ephemeral=True)
         return
-
-    레이드이름 = 레이드이름.strip()
-    캐릭터명 = 캐릭터명.strip()
-
-    if not 레이드이름:
-        await interaction.response.send_message(
-            "레이드 이름이 비어 있습니다.",
-            ephemeral=True,
-        )
+    await interaction.response.defer(ephemeral=True)
+    applications = list_user_applications(interaction.guild.id, interaction.user.id, 레이드이름)
+    matched = [app for app in applications if str(app["character_name"]).strip() == 캐릭터명.strip()]
+    if not matched:
+        await interaction.followup.send("취소할 신청 내역이 없습니다.", ephemeral=True)
         return
-
-    if not 캐릭터명:
-        await interaction.response.send_message(
-            "캐릭터명이 비어 있습니다.",
-            ephemeral=True,
-        )
+    target = matched[0]
+    if len(matched) > 1:
+        view = ApplicationCancelView(interaction.user.id, matched)
+        await interaction.followup.send("취소할 신청 내역을 선택하세요.", view=view, ephemeral=True)
+        timeout = await view.wait()
+        if timeout or view.value != "submit" or view.selected_application is None:
+            return
+        target = view.selected_application
+    generated_rows = list_raid_parties(interaction.guild.id, 레이드이름, None)
+    if find_generated_rows_for_target(generated_rows, target):
+        await interaction.followup.send("이미 공대 생성에 반영된 신청 내역이라 바로 취소할 수 없습니다.", ephemeral=True)
         return
+    delete_application(int(target["id"]))
+    await interaction.followup.send(build_cancel_result_text(target), ephemeral=True)
 
-    await interaction.response.defer(ephemeral=True, thinking=True)
-
-    try:
-        applications = list_user_applications(
-            guild_id=interaction.guild.id,
-            user_id=interaction.user.id,
-            raid_name=레이드이름,
-        )
-
-        if not applications:
-            await interaction.followup.send(
-                f"`{레이드이름}` 레이드에 신청한 내역이 없습니다.",
-                ephemeral=True,
-            )
-            return
-
-        matched = [
-            app for app in applications
-            if str(app["character_name"]).strip() == 캐릭터명
-        ]
-
-        if not matched:
-            await interaction.followup.send(
-                f"`{레이드이름}` 레이드에 `{캐릭터명}` 캐릭터 신청 내역이 없습니다.",
-                ephemeral=True,
-            )
-            return
-
-        # 1건이면 바로 취소
-        if len(matched) == 1:
-            target = matched[0]
-
-        # 여러 건이면 종족/서버 선택 UI
-        else:
-            view = ApplicationCancelView(
-                user_id=interaction.user.id,
-                applications=matched,
-            )
-
-            await interaction.followup.send(
-                f"`{레이드이름}` 레이드에 `{캐릭터명}` 이름의 신청이 여러 건 있습니다.\n"
-                "취소할 종족/서버를 선택하세요.",
-                view=view,
-                ephemeral=True,
-            )
-
-            timeout = await view.wait()
-            if timeout:
-                await interaction.followup.send(
-                    "신청 취소 선택 시간이 초과되었습니다.",
-                    ephemeral=True,
-                )
-                return
-
-            if view.value != "submit" or view.selected_application is None:
-                return
-
-            target = view.selected_application
-
-                generated_rows = list_raid_parties(
-            guild_id=interaction.guild.id,
-            raid_name=레이드이름,
-            weekday=None,
-        )
-
-        already_generated = [
-            row for row in generated_rows
-            if str(row.get("race_code", "")).strip() == str(target.get("race_code", "")).strip()
-            and str(row.get("server_code", "")).strip() == str(target.get("server_code", "")).strip()
-            and str(row.get("character_name", "")).strip() == str(target.get("character_name", "")).strip()
-        ]
-
-        if already_generated:
-            assigned_weekdays = sorted({
-                str(row.get("weekday", "")).strip()
-                for row in already_generated
-                if str(row.get("status", "")).strip() == "ASSIGNED"
-            })
-
-            waiting_weekdays = sorted({
-                str(row.get("weekday", "")).strip()
-                for row in already_generated
-                if str(row.get("status", "")).strip() == "WAITING"
-            })
-
-            lines = [
-                "이미 공대 생성에 반영된 신청 내역이라 바로 취소할 수 없습니다.",
-                "이번 주 변동사항이면 관리자에게 문의해주세요.",
-                "관리자는 `/공대수정` 또는 `/공대초기화` 후 재생성으로 처리할 수 있습니다.",
-            ]
-
-            if assigned_weekdays:
-                lines.append(f"- 배정 요일: {', '.join(assigned_weekdays)}")
-            if waiting_weekdays:
-                lines.append(f"- 대기 행 존재 요일: {', '.join(waiting_weekdays)}")
-
-            lines.append("수정된 신청 내용은 다음 주 공대 생성부터 반영됩니다.")
-
-            await interaction.followup.send(
-                "\n".join(lines),
-                ephemeral=True,
-            )
-            return
-            
-        deleted = delete_application(int(target["id"]))
-        if not deleted:
-            await interaction.followup.send(
-                "신청 취소에 실패했습니다.",
-                ephemeral=True,
-            )
-            return
-
-        await interaction.followup.send(
-            build_cancel_result_text(target),
-            ephemeral=True,
-        )
-
-
-# ========================================================
-# /강제삭제
-# ========================================================
 
 @bot.tree.command(name="강제삭제", description="관리자가 레이드 신청 내역을 강제로 삭제합니다.")
-@app_commands.describe(
-    레이드이름="삭제할 레이드 이름",
-    캐릭터명="삭제할 캐릭터명",
-)
-async def force_delete_application_command(
-    interaction: discord.Interaction,
-    레이드이름: str,
-    캐릭터명: str,
-):
-    if interaction.guild is None:
-        await interaction.response.send_message(
-            "서버 안에서만 사용할 수 있는 명령어입니다.",
-            ephemeral=True,
-        )
+async def force_delete_application_command(interaction: discord.Interaction, 레이드이름: str, 캐릭터명: str):
+    if interaction.guild is None or not is_admin(interaction):
+        await interaction.response.send_message("관리자만 서버 안에서 사용할 수 있습니다.", ephemeral=True)
         return
-
-    if not is_admin(interaction):
-        await interaction.response.send_message(
-            "관리자만 사용할 수 있는 명령어입니다.",
-            ephemeral=True,
-        )
+    await interaction.response.defer(ephemeral=True)
+    matched = list_applications_by_character_name(interaction.guild.id, 레이드이름, 캐릭터명)
+    if not matched:
+        await interaction.followup.send("삭제할 신청 내역이 없습니다.", ephemeral=True)
         return
-
-    레이드이름 = 레이드이름.strip()
-    캐릭터명 = 캐릭터명.strip()
-
-    if not 레이드이름:
-        await interaction.response.send_message(
-            "레이드 이름이 비어 있습니다.",
-            ephemeral=True,
-        )
-        return
-
-    if not 캐릭터명:
-        await interaction.response.send_message(
-            "캐릭터명이 비어 있습니다.",
-            ephemeral=True,
-        )
-        return
-
-    await interaction.response.defer(ephemeral=True, thinking=True)
-
-    try:
-        matched = list_applications_by_character_name(
-            guild_id=interaction.guild.id,
-            raid_name=레이드이름,
-            character_name=캐릭터명,
-        )
-
-        if not matched:
-            await interaction.followup.send(
-                f"`{레이드이름}` 레이드에 `{캐릭터명}` 캐릭터 신청 내역이 없습니다.",
-                ephemeral=True,
-            )
-            return
-
-        # 1건이면 바로 삭제
-        if len(matched) == 1:
-            target = matched[0]
-
-            generated_rows = list_raid_parties(
-                guild_id=interaction.guild.id,
-                raid_name=레이드이름,
-                weekday=None,
-            )
-
-            already_generated = [
-                row for row in generated_rows
-                if str(row.get("race_code", "")).strip() == str(target.get("race_code", "")).strip()
-                and str(row.get("server_code", "")).strip() == str(target.get("server_code", "")).strip()
-                and str(row.get("character_name", "")).strip() == str(target.get("character_name", "")).strip()
-            ]
-
-            if already_generated:
-                await interaction.followup.send(
-                    "이미 공대 생성에 반영된 신청 내역이라 강제삭제할 수 없습니다.\n"
-                    "이번 주 변동사항이면 `/공대수정` 또는 `/공대초기화` 후 재생성으로 처리해주세요.",
-                    ephemeral=True,
-                )
-                return
-
-            deleted = delete_application(int(target["id"]))
-
-            if deleted:
-                await interaction.followup.send(
-                    build_force_delete_result_text(target),
-                    ephemeral=True,
-                )
-            else:
-                await interaction.followup.send(
-                    "강제삭제에 실패했습니다.",
-                    ephemeral=True,
-                )
-            return
-
-        # 여러 건이면 종족/서버 선택
-        view = ForceDeleteRaceServerView(
-            user_id=interaction.user.id,
-            applications=matched,
-        )
-
-        await interaction.followup.send(
-            f"`{레이드이름}` 레이드에 `{캐릭터명}` 이름의 신청이 여러 건 있습니다.\n"
-            "삭제할 종족/서버를 선택하세요.",
-            view=view,
-            ephemeral=True,
-        )
-
+    target = matched[0]
+    if len(matched) > 1:
+        view = ForceDeleteRaceServerView(interaction.user.id, matched)
+        await interaction.followup.send("삭제할 종족/서버를 선택하세요.", view=view, ephemeral=True)
         timeout = await view.wait()
-        if timeout:
-            await interaction.followup.send(
-                "강제삭제 선택 시간이 초과되었습니다.",
-                ephemeral=True,
-            )
+        if timeout or view.value != "submit" or view.selected_application is None:
             return
+        target = view.selected_application
+    generated_rows = list_raid_parties(interaction.guild.id, 레이드이름, None)
+    if find_generated_rows_for_target(generated_rows, target):
+        await interaction.followup.send("이미 공대 생성에 반영된 신청 내역이라 강제삭제할 수 없습니다.", ephemeral=True)
+        return
+    delete_application(int(target["id"]))
+    await interaction.followup.send(build_force_delete_result_text(target), ephemeral=True)
 
-        if view.value != "submit" or view.selected_application is None:
-            return
-
-                target = view.selected_application
-
-        generated_rows = list_raid_parties(
-            guild_id=interaction.guild.id,
-            raid_name=레이드이름,
-            weekday=None,
-        )
-
-        already_generated = [
-            row for row in generated_rows
-            if str(row.get("race_code", "")).strip() == str(target.get("race_code", "")).strip()
-            and str(row.get("server_code", "")).strip() == str(target.get("server_code", "")).strip()
-            and str(row.get("character_name", "")).strip() == str(target.get("character_name", "")).strip()
-        ]
-
-        if already_generated:
-            await interaction.followup.send(
-                "이미 공대 생성에 반영된 신청 내역이라 강제삭제할 수 없습니다.\n"
-                "이번 주 변동사항이면 `/공대수정` 또는 `/공대초기화` 후 재생성으로 처리해주세요.",
-                ephemeral=True,
-            )
-            return
-
-        deleted = delete_application(int(target["id"]))
-
-        if deleted:
-            await interaction.followup.send(
-                build_force_delete_result_text(target),
-                ephemeral=True,
-            )
-        else:
-            await interaction.followup.send(
-                "강제삭제에 실패했습니다.",
-                ephemeral=True,
-            )
-
-    except Exception as e:
-        await interaction.followup.send(
-            f"강제삭제 중 오류가 발생했습니다.\n`{e}`",
-            ephemeral=True,
-        )
-
-
-# ========================================================
-# /신청수정
-# ========================================================
 
 @bot.tree.command(name="신청수정", description="내 레이드 신청 내역을 수정합니다.")
-@app_commands.describe(
-    레이드이름="수정할 레이드 이름",
-    캐릭터명="수정할 캐릭터명",
-)
-async def update_application_command(
-    interaction: discord.Interaction,
-    레이드이름: str,
-    캐릭터명: str,
-):
+async def update_application_command(interaction: discord.Interaction, 레이드이름: str, 캐릭터명: str):
     if interaction.guild is None:
-        await interaction.response.send_message(
-            "서버 안에서만 사용할 수 있는 명령어입니다.",
-            ephemeral=True,
-        )
+        await interaction.response.send_message("서버 안에서만 사용할 수 있습니다.", ephemeral=True)
         return
-
-    레이드이름 = 레이드이름.strip()
-    캐릭터명 = 캐릭터명.strip()
-
-    if not 레이드이름:
-        await interaction.response.send_message(
-            "레이드 이름이 비어 있습니다.",
-            ephemeral=True,
-        )
-        return
-
-    if not 캐릭터명:
-        await interaction.response.send_message(
-            "캐릭터명이 비어 있습니다.",
-            ephemeral=True,
-        )
-        return
-
-    await interaction.response.defer(ephemeral=True, thinking=True)
-
-    try:
-        # 1) 레이드 존재 확인
-        raid = get_raid(interaction.guild.id, 레이드이름)
-        if raid is None:
-            await interaction.followup.send(
-                f"`{레이드이름}` 레이드는 존재하지 않습니다.",
-                ephemeral=True,
-            )
+    await interaction.response.defer(ephemeral=True)
+    guild_setting = get_guild_setting(interaction.guild.id)
+    used_default_setting = guild_setting is not None
+    if guild_setting:
+        race_code, race_name = guild_setting["race_code"], guild_setting["race_name"]
+        server_code, server_name = guild_setting["server_code"], guild_setting["server_name"]
+    else:
+        my_apps = list_user_applications(interaction.guild.id, interaction.user.id, 레이드이름)
+        name_matched = [app for app in my_apps if str(app["character_name"]).strip() == 캐릭터명.strip()]
+        if not name_matched:
+            await interaction.followup.send("수정할 신청 내역이 없습니다.", ephemeral=True)
             return
-
-        # 2) 서버 기본 설정 확인
-        guild_setting = get_guild_setting(interaction.guild.id)
-
-        if guild_setting is not None:
-            race_code = str(guild_setting["race_code"])
-            race_name = str(guild_setting["race_name"])
-            server_code = str(guild_setting["server_code"])
-            server_name = str(guild_setting["server_name"])
-            used_default_setting = True
+        if len(name_matched) == 1:
+            target_existing = name_matched[0]
+            race_code, race_name = target_existing["race_code"], target_existing["race_name"]
+            server_code, server_name = target_existing["server_code"], target_existing["server_name"]
         else:
-            used_default_setting = False
-
-            # 캐릭터명 동일, 레이드 동일인 내 신청건들을 먼저 조회해
-            # 같은 이름이 여러 종족/서버에 있을 수 있으니 후보를 넓게 찾는다.
-            my_apps = list_user_applications(
-                guild_id=interaction.guild.id,
-                user_id=interaction.user.id,
-                raid_name=레이드이름,
-            )
-
-            name_matched = [
-                app for app in my_apps
-                if str(app["character_name"]).strip() == 캐릭터명
-            ]
-
-            if not name_matched:
-                await interaction.followup.send(
-                    f"`{레이드이름}` 레이드에 `{캐릭터명}` 캐릭터 신청 내역이 없습니다.",
-                    ephemeral=True,
-                )
+            view = ApplicationRaceServerView(interaction.user.id)
+            await interaction.followup.send("수정할 신청의 종족/서버를 선택하세요.", view=view, ephemeral=True)
+            timeout = await view.wait()
+            if timeout or view.value != "submit":
                 return
+            race_code, race_name = view.selected_race_code, view.selected_race_name
+            server_code, server_name = view.selected_server_code, view.selected_server_name
+    existing = get_user_application(interaction.guild.id, interaction.user.id, 레이드이름, race_code, server_code, 캐릭터명)
+    if existing is None:
+        await interaction.followup.send("수정할 신청 내역이 없습니다.", ephemeral=True)
+        return
+    generated_rows = list_raid_parties(interaction.guild.id, 레이드이름, None)
+    already_generated = bool(find_generated_rows_for_target(generated_rows, existing))
+    data = get_character_info(race_code, race_name, server_code, server_name, 캐릭터명)
+    view = WeekdayMultiSelectView(interaction.user.id, existing.get("available_days") or [], existing.get("note") or "")
+    await interaction.followup.send("가능 요일과 특이사항을 다시 입력하세요.", view=view, ephemeral=True)
+    timeout = await view.wait()
+    if timeout or view.value != "submit":
+        return
+    update_application(int(existing["id"]), {
+        "user_name": interaction.user.display_name,
+        "raid_name": 레이드이름,
+        "race_code": race_code,
+        "race_name": race_name,
+        "server_code": server_code,
+        "server_name": server_name,
+        "character_name": data["nickname"],
+        "job_name": data["job_name"],
+        "item_level": data["item_level"],
+        "combat_score": data["combat_score"],
+        "peak_combat_score": data["peak_combat_score"],
+        "available_days": view.selected_days,
+        "note": view.note,
+    })
+    await interaction.followup.send(embed=build_application_update_embed(레이드이름, data, view.selected_days, view.note, not used_default_setting), ephemeral=False)
+    msg = "신청 수정이 저장되었습니다."
+    if already_generated:
+        msg += "\n※ 이미 생성된 공대에는 이번 주 자동 반영되지 않습니다."
+    await interaction.followup.send(msg, ephemeral=True)
 
-            # 설정이 없는 경우, 기존 신청건이 1건이면 그 신청건의 종족/서버를 기본값처럼 사용
-            # 여러 건이면 새로 선택받는다.
-            if len(name_matched) == 1:
-                target_existing = name_matched[0]
-                race_code = str(target_existing["race_code"])
-                race_name = str(target_existing["race_name"])
-                server_code = str(target_existing["server_code"])
-                server_name = str(target_existing["server_name"])
-            else:
-                race_server_view = ApplicationRaceServerView(user_id=interaction.user.id)
-                await interaction.followup.send(
-                    "이 서버에는 기본 종족/서버 설정이 없습니다.\n"
-                    "수정할 신청에 해당하는 종족과 종족 서버를 선택하세요.",
-                    view=race_server_view,
-                    ephemeral=True,
-                )
-
-                timeout = await race_server_view.wait()
-                if timeout:
-                    await interaction.followup.send(
-                        "종족/종족 서버 선택 시간이 초과되었습니다.",
-                        ephemeral=True,
-                    )
-                    return
-
-                if race_server_view.value != "submit":
-                    return
-
-                race_code = str(race_server_view.selected_race_code)
-                race_name = str(race_server_view.selected_race_name)
-                server_code = str(race_server_view.selected_server_code)
-                server_name = str(race_server_view.selected_server_name)
-
-        # 3) 수정 대상 신청건 조회 (본인 기준)
-        existing = get_user_application(
-            guild_id=interaction.guild.id,
-            user_id=interaction.user.id,
-            raid_name=레이드이름,
-            race_code=race_code,
-            server_code=server_code,
-            character_name=캐릭터명,
-        )
-
-        if existing is None:
-            await interaction.followup.send(
-                f"`{레이드이름}` 레이드에 `{캐릭터명}` 신청 내역이 없습니다.",
-                ephemeral=True,
-            )
-            return
-
-        # 4) 이미 공대 생성에 반영된 캐릭터인지 확인
-        generated_rows = list_raid_parties(
-            guild_id=interaction.guild.id,
-            raid_name=레이드이름,
-            weekday=None,
-        )
-
-        already_generated = False
-        for row in generated_rows:
-            if (
-                str(row.get("race_code")).strip() == race_code
-                and str(row.get("server_code")).strip() == server_code
-                and str(row.get("character_name")).strip() == 캐릭터명
-            ):
-                already_generated = True
-                break
-
-        # 5) 아툴 재조회
-        data = get_character_info(
-            race_code=race_code,
-            race_name=race_name,
-            server_code=server_code,
-            server_name=server_name,
-            character_name=캐릭터명,
-        )
-
-        # 6) 입장 조건 재검사
-        condition_type = str(raid["condition_type"])
-        condition_value = int(raid["condition_value"])
-
-        if condition_type == "item_level":
-            current_value = int(data["item_level"])
-            condition_label = "템렙"
-        else:
-            current_value = int(data["combat_score"])
-            condition_label = "아툴 점수"
-
-        if current_value < condition_value:
-            await interaction.followup.send(
-                f"수정 불가: `{레이드이름}` 레이드의 입장 조건은 "
-                f"`{condition_label} {condition_value}` 이상입니다.\n"
-                f"현재 캐릭터 수치: `{current_value}`",
-                ephemeral=True,
-            )
-            return
-
-        # 7) 요일/특이사항 다시 입력
-        initial_days = existing.get("available_days") or []
-        initial_note = (existing.get("note") or "").strip()
-
-        weekday_view = WeekdayMultiSelectView(
-            user_id=interaction.user.id,
-            initial_days=initial_days,
-            initial_note=initial_note,
-        )
-
-        await interaction.followup.send(
-            f"`{캐릭터명}` 신청 수정을 진행합니다.\n"
-            f"현재 가능 요일: {format_days(initial_days)}\n"
-            f"현재 특이사항: {initial_note or '-'}\n"
-            "가능 요일과 특이사항을 다시 입력하세요.",
-            view=weekday_view,
-            ephemeral=True,
-        )
-
-        timeout = await weekday_view.wait()
-        if timeout:
-            await interaction.followup.send(
-                "가능 요일 입력 시간이 초과되었습니다.",
-                ephemeral=True,
-            )
-            return
-
-        if weekday_view.value not in ("submit", "submit_with_note"):
-            return
-
-        available_days = weekday_view.selected_days
-        note = weekday_view.note
-
-        # 8) DB 수정
-        update_application(
-            int(existing["id"]),
-            {
-                "user_name": interaction.user.display_name,
-                "raid_name": 레이드이름,
-                "race_code": race_code,
-                "race_name": race_name,
-                "server_code": server_code,
-                "server_name": server_name,
-                "character_name": data["nickname"],
-                "job_name": data["job_name"],
-                "item_level": data["item_level"],
-                "combat_score": data["combat_score"],
-                "peak_combat_score": data["peak_combat_score"],
-                "available_days": available_days,
-                "note": note,
-            },
-        )
-
-        # 9) 공개 수정 완료 메시지
-        embed = build_application_update_embed(
-            raid_name=레이드이름,
-            data=data,
-            available_days=available_days,
-            note=note,
-            show_race_server=not used_default_setting,
-        )
-        await interaction.followup.send(embed=embed, ephemeral=False)
-
-        if already_generated:
-            await interaction.followup.send(
-                "신청 수정이 저장되었습니다.\n"
-                "※ 이미 생성된 공대에는 이번 주 자동 반영되지 않습니다.\n"
-                "※ 수정된 신청 내용은 다음 공대 생성부터 반영됩니다.\n"
-                "※ 이번 주 공대 변경이 필요하면 관리자에게 문의하세요.",
-                ephemeral=True,
-            )
-        else:
-            await interaction.followup.send(
-                "신청 수정이 저장되었습니다.",
-                ephemeral=True,
-            )
-
-    except AtoolError as e:
-        await interaction.followup.send(
-            f"아툴 조회 실패: {e}",
-            ephemeral=True,
-        )
-    except Exception as e:
-        await interaction.followup.send(
-            f"신청 수정 중 오류가 발생했습니다.\n`{e}`",
-            ephemeral=True,
-        )
-
-
-# ========================================================
-# /공대생성
-# ========================================================
-
-# 관리자만 사용 가능
 
 @bot.tree.command(name="공대생성", description="레이드 공대를 자동 생성합니다.")
-@app_commands.describe(
-    레이드이름="공대를 생성할 레이드 이름",
-    요일="공대 생성 대상 요일",
-)
-async def create_parties_command(
-    interaction: discord.Interaction,
-    레이드이름: str,
-    요일: str,
-):
-    if interaction.guild is None:
-        await interaction.response.send_message(
-            "서버 안에서만 사용할 수 있는 명령어입니다.",
-            ephemeral=True,
-        )
+async def create_parties_command(interaction: discord.Interaction, 레이드이름: str, 요일: str):
+    if interaction.guild is None or not is_admin(interaction):
+        await interaction.response.send_message("관리자만 서버 안에서 사용할 수 있습니다.", ephemeral=True)
         return
-
-    if not is_admin(interaction):
-        await interaction.response.send_message(
-            "관리자만 사용할 수 있는 명령어입니다.",
-            ephemeral=True,
-        )
-        return
-
     raid_name = 레이드이름.strip()
     weekday = 요일.strip()
-
-    if not raid_name:
-        await interaction.response.send_message(
-            "레이드 이름이 비어 있습니다.",
-            ephemeral=True,
-        )
-        return
-
     if weekday not in VALID_WEEKDAYS:
-        await interaction.response.send_message(
-            "요일은 월, 화, 수, 목, 금, 토, 일 중 하나여야 합니다.",
-            ephemeral=True,
-        )
+        await interaction.response.send_message("요일은 월~일 중 하나여야 합니다.", ephemeral=True)
         return
+    await interaction.response.defer(ephemeral=True)
+    if get_raid(interaction.guild.id, raid_name) is None:
+        await interaction.followup.send("레이드가 존재하지 않습니다.", ephemeral=True)
+        return
+    applications = list_raid_applications_by_weekday(interaction.guild.id, raid_name, weekday)
+    if not applications:
+        await interaction.followup.send("해당 요일 신청자가 없습니다.", ephemeral=True)
+        return
+    all_party_rows = list_raid_parties(interaction.guild.id, raid_name, None)
+    existing_same_weekday_rows = [row for row in all_party_rows if str(row.get("weekday", "")).strip() == weekday]
+    candidates = exclude_already_generated_characters(applications, existing_same_weekday_rows)
+    other_weekday_assigned_rows = [
+        row for row in all_party_rows
+        if str(row.get("weekday", "")).strip() != weekday and str(row.get("status", "")).strip() == "ASSIGNED"
+    ]
+    candidates, cross_weekday_members = split_members_already_assigned_other_weekday(candidates, other_weekday_assigned_rows)
+    if not candidates and not cross_weekday_members:
+        await interaction.followup.send("새로 생성할 대상이 없습니다.", ephemeral=True)
+        return
+    refreshed_candidates, refresh_warnings = refresh_candidates_for_party_generation_optimized(candidates)
+    initial_rules = load_party_rules(interaction.guild.id, raid_name) or build_default_all_slot_rules()
+    rule_view = PartyRuleSetupView(interaction.user.id, initial_rules)
+    await interaction.followup.send(f"```text\n{rule_view.build_summary_text()}\n```", view=rule_view, ephemeral=True)
+    timeout = await rule_view.wait()
+    if timeout or rule_view.value != "submit" or rule_view.exported_rules is None:
+        return
+    save_party_rules(interaction.guild.id, raid_name, rule_view.exported_rules, interaction.user.id)
+    raids, waiting_members, warnings = build_balanced_raids(refreshed_candidates, rule_view.exported_rules)
+    rows = flatten_raids_to_party_rows(interaction.guild.id, raid_name, weekday, raids, waiting_members)
+    replace_raid_parties(interaction.guild.id, raid_name, weekday, rows)
+    source_note = "설정한 공대 규칙 기준 / 공대 생성 시점 기준"
+    embed = build_raid_result_embed(raid_name, weekday, raids, waiting_members, cross_weekday_members, source_note)
+    text = format_raid_result_text(raid_name, weekday, raids, waiting_members, cross_weekday_members, source_note)
+    await interaction.followup.send(embed=embed, ephemeral=False)
+    await send_long_text_followup(interaction, text, ephemeral=False)
+    all_warnings = refresh_warnings + warnings
+    if all_warnings:
+        await interaction.followup.send("```text\n" + "\n".join(all_warnings[:30]) + "\n```", ephemeral=True)
 
-    await interaction.response.defer(ephemeral=True, thinking=True)
-
-    try:
-        # 1) 레이드 존재 확인
-        raid = get_raid(interaction.guild.id, raid_name)
-        if raid is None:
-            await interaction.followup.send(
-                f"`{raid_name}` 레이드는 존재하지 않습니다.",
-                ephemeral=True,
-            )
-            return
-
-        # 2) 해당 요일 신청자 조회
-        applications = list_raid_applications_by_weekday(
-            guild_id=interaction.guild.id,
-            raid_name=raid_name,
-            weekday=weekday,
-        )
-
-        if not applications:
-            await interaction.followup.send(
-                f"`{raid_name}` 레이드의 `{weekday}` 신청자가 없습니다.",
-                ephemeral=True,
-            )
-            return
-
-        # 3) 같은 레이드의 전체 공대 내역 조회
-        all_party_rows = list_raid_parties(
-            guild_id=interaction.guild.id,
-            raid_name=raid_name,
-            weekday=None,
-        )
-        
-        # 4) 이미 해당 요일에 생성된 캐릭터 제외
-        existing_same_weekday_rows = [
-            row for row in all_party_rows
-            if str(row.get("weekday", "")).strip() == weekday
-        ]
-        
-        candidates = exclude_already_generated_characters(applications, existing_same_weekday_rows)
-        
-        # 5) 다른 요일 공대에 이미 배정된 캐릭터 제외
-        candidates, other_weekday_notices = exclude_characters_assigned_on_other_weekdays(
-            candidates=candidates,
-            all_party_rows=all_party_rows,
-            target_weekday=weekday,
-        )
-
-        # 6) 생성 후보가 하나도 없을 때
-        if not candidates:
-            extra_lines: list[str] = [
-                f"`{raid_name}` 레이드의 `{weekday}` 신청자 중 새로 생성할 수 있는 캐릭터가 없습니다."
-            ]
-        
-            if other_weekday_notices:
-                preview = "\n".join(f"- {text}" for text in other_weekday_notices[:10])
-                extra_lines.append("")
-                extra_lines.append("타 요일 배정 제외 내역")
-                extra_lines.append(f"```text\n{preview}\n```")
-        
-            await interaction.followup.send(
-                "\n".join(extra_lines),
-                ephemeral=True,
-            )
-            return
-
-        # 7) 공대 생성 시점 기준 아툴 재조회
-        refreshed_candidates, refresh_warnings = refresh_candidates_for_party_generation_optimized(candidates)
-
-        # 8) 기존 규칙 불러오기
-        initial_rules = load_party_rules(interaction.guild.id, raid_name)
-        if not initial_rules:
-            initial_rules = build_default_all_slot_rules()
-
-        # 9) 규칙 UI
-        rule_view = PartyRuleSetupView(
-            user_id=interaction.user.id,
-            initial_rules=initial_rules,
-        )
-
-        rule_message = "공대 생성 규칙을 설정하세요."
-        if has_party_rules(interaction.guild.id, raid_name):
-            rule_message += "\n기존 저장 규칙을 불러왔습니다."
-
-        await interaction.followup.send(
-            f"{rule_message}\n\n```text\n{rule_view.build_summary_text()}\n```",
-            view=rule_view,
-            ephemeral=True,
-        )
-
-        timeout = await rule_view.wait()
-        if timeout:
-            await interaction.followup.send(
-                "공대 생성 규칙 입력 시간이 초과되었습니다.",
-                ephemeral=True,
-            )
-            return
-
-        if rule_view.value != "submit" or rule_view.exported_rules is None:
-            return
-
-        slot_rules = rule_view.exported_rules
-
-        # 10) 규칙 저장
-        save_party_rules(
-            guild_id=interaction.guild.id,
-            raid_name=raid_name,
-            slots=slot_rules,
-            updated_by=interaction.user.id,
-        )
-
-        # 11) 재조회된 값으로 공대 생성
-        raids, waiting_members, warnings = build_balanced_raids(
-            candidates=refreshed_candidates,
-            slot_rules=slot_rules,
-        )
-
-        if not raids and not waiting_members and not cross_weekday_members:
-            await interaction.followup.send(
-                "공대 생성 결과가 비어 있습니다.",
-                ephemeral=True,
-            )
-            return
-
-        # 12) DB 저장용 row 변환
-        rows = flatten_raids_to_party_rows(
-            guild_id=interaction.guild.id,
-            raid_name=raid_name,
-            weekday=weekday,
-            raids=raids,
-            waiting_members=waiting_members,
-        )
-
-        # 13) 저장
-        replace_raid_parties(
-            guild_id=interaction.guild.id,
-            raid_name=raid_name,
-            weekday=weekday,
-            members=rows,
-        )
-
-        # 14) 결과 출력
-        source_note = "설정한 공대 규칙 기준 / 공대 생성 시점 기준"
-        embed = build_raid_result_embed(
-            raid_name=raid_name,
-            weekday=weekday,
-            raids=raids,
-            waiting_members=waiting_members,
-            cross_weekday_members=cross_weekday_members,
-            source_note=source_note,
-        )
-
-        text = format_raid_result_text(
-            raid_name=raid_name,
-            weekday=weekday,
-            raids=raids,
-            waiting_members=waiting_members,
-            cross_weekday_members=cross_weekday_members,
-            source_note=source_note,
-        )
-
-        await interaction.followup.send(embed=embed, ephemeral=False)
-        await send_long_text_followup(interaction, text, ephemeral=False)
-
-        all_warnings = []
-        all_warnings.extend(other_weekday_notices)
-        all_warnings.extend(refresh_warnings)
-        all_warnings.extend(warnings)
-
-        if all_warnings:
-            warning_text = "\n".join(f"- {w}" for w in all_warnings[:30])
-            await interaction.followup.send(
-                f"생성 참고 사항\n```text\n{warning_text}\n```",
-                ephemeral=True,
-            )
-
-    except Exception as e:
-        await interaction.followup.send(
-            f"공대 생성 중 오류가 발생했습니다.\n`{e}`",
-            ephemeral=True,
-        )
-
-
-# ========================================================
-# /공대확인
-# ========================================================
-
-# 요일이 없으면 레이드에 생성된 모든 공대가 표시됨
-# 요일이 있으면 해당 요일의 레이드 공대가 표시됨
-# 기본적으로 나만 보기, 관리자의 경우 공개 여부 설정 가능
 
 @bot.tree.command(name="공대확인", description="생성된 공대 내역을 확인합니다.")
-@app_commands.describe(
-    레이드이름="확인할 레이드 이름",
-    보기옵션="전체 / 요일 / 대기",
-    요일="보기옵션이 '요일' 또는 '대기'일 때 사용할 요일",
-)
 @app_commands.choices(보기옵션=VIEW_OPTION_CHOICES)
-async def check_parties_command(
-    interaction: discord.Interaction,
-    레이드이름: str,
-    보기옵션: app_commands.Choice[str],
-    요일: str | None = None,
-):
+async def check_parties_command(interaction: discord.Interaction, 레이드이름: str, 보기옵션: app_commands.Choice[str], 요일: str | None = None):
     if interaction.guild is None:
-        await interaction.response.send_message(
-            "서버 안에서만 사용할 수 있는 명령어입니다.",
-            ephemeral=True,
-        )
+        await interaction.response.send_message("서버 안에서만 사용할 수 있습니다.", ephemeral=True)
         return
-
     raid_name = 레이드이름.strip()
     view_option = 보기옵션.value
     weekday = 요일.strip() if 요일 else None
-
-    if not raid_name:
-        await interaction.response.send_message(
-            "레이드 이름이 비어 있습니다.",
-            ephemeral=True,
-        )
+    if view_option in ("요일", "대기") and weekday not in VALID_WEEKDAYS:
+        await interaction.response.send_message("요일을 올바르게 입력하세요.", ephemeral=True)
         return
-
-    if view_option in ("요일", "대기"):
-        if not weekday:
-            await interaction.response.send_message(
-                f"보기옵션이 `{view_option}`일 때는 요일을 함께 입력해야 합니다.",
-                ephemeral=True,
-            )
+    result_ephemeral = True
+    if is_admin(interaction):
+        view = PartyConfirmVisibilityView(interaction.user.id)
+        await interaction.response.send_message("공개 여부를 선택하세요.", view=view, ephemeral=True)
+        timeout = await view.wait()
+        if timeout or view.value in (None, "cancel"):
             return
-
-        if weekday not in VALID_WEEKDAYS:
-            await interaction.response.send_message(
-                "요일은 월, 화, 수, 목, 금, 토, 일 중 하나여야 합니다.",
-                ephemeral=True,
-            )
+        result_ephemeral = view.value != "public"
+    else:
+        await interaction.response.defer(ephemeral=True)
+    all_party_rows = list_raid_parties(interaction.guild.id, raid_name, None)
+    if view_option == "전체":
+        if not all_party_rows:
+            await interaction.followup.send("공대 생성 내역이 없습니다.", ephemeral=True)
             return
+        grouped = group_party_rows_by_weekday(all_party_rows)
+        for grouped_weekday in sorted(grouped.keys()):
+            raids, waiting_members = convert_rows_to_raid_structure(grouped[grouped_weekday])
+            await interaction.followup.send(embed=build_party_check_embed(raid_name, grouped_weekday, raids, waiting_members), ephemeral=result_ephemeral)
+            await send_long_text_followup(interaction, format_party_check_text_for_weekday(raid_name, grouped_weekday, raids, waiting_members), ephemeral=result_ephemeral)
+        return
+    if view_option == "요일":
+        weekday_rows = [row for row in all_party_rows if str(row.get("weekday", "")).strip() == weekday]
+        raids, waiting_members = convert_rows_to_raid_structure(weekday_rows)
+        await interaction.followup.send(embed=build_party_check_embed(raid_name, weekday, raids, waiting_members), ephemeral=result_ephemeral)
+        await send_long_text_followup(interaction, format_party_check_text_for_weekday(raid_name, weekday, raids, waiting_members), ephemeral=result_ephemeral)
+        return
+    weekday_applications = list_raid_applications_by_weekday(interaction.guild.id, raid_name, weekday)
+    other_weekday_assigned_rows = [row for row in all_party_rows if str(row.get("weekday", "")).strip() != weekday and str(row.get("status", "")).strip() == "ASSIGNED"]
+    waiting_candidates, assigned_other_weekday_candidates = split_members_already_assigned_other_weekday(weekday_applications, other_weekday_assigned_rows)
+    embed = discord.Embed(title=f"[{raid_name}] {weekday} 대기 확인", color=discord.Color.orange())
+    embed.add_field(name="대기 인원", value=str(len(waiting_candidates)), inline=False)
+    embed.add_field(name="타 요일 배정 인원", value=str(len(assigned_other_weekday_candidates)), inline=False)
+    await interaction.followup.send(embed=embed, ephemeral=result_ephemeral)
+    await send_long_text_followup(interaction, format_waiting_only_text(raid_name, weekday, waiting_candidates, assigned_other_weekday_candidates), ephemeral=result_ephemeral)
 
-    try:
-        if is_admin(interaction):
-            view = PartyConfirmVisibilityView(user_id=interaction.user.id)
-            await interaction.response.send_message(
-                "공대 확인 결과를 공개할지 선택해주세요.",
-                view=view,
-                ephemeral=True,
-            )
-
-            timeout = await view.wait()
-            if timeout:
-                return
-
-            if view.value in (None, "cancel"):
-                return
-
-            result_ephemeral = (view.value != "public")
-        else:
-            await interaction.response.defer(ephemeral=True, thinking=True)
-            result_ephemeral = True
-
-        # 전체 공대 row
-        all_party_rows = list_raid_parties(
-            guild_id=interaction.guild.id,
-            raid_name=raid_name,
-            weekday=None,
-        )
-
-        # 보기옵션: 전체
-        if view_option == "전체":
-            if not all_party_rows:
-                await interaction.followup.send(
-                    f"`{raid_name}` 레이드의 공대 생성 내역이 없습니다.",
-                    ephemeral=True,
-                )
-                return
-
-            grouped = group_party_rows_by_weekday(all_party_rows)
-
-            all_rows_count = len(all_party_rows)
-            total_assigned = sum(1 for row in all_party_rows if str(row.get("status")) == "ASSIGNED")
-            total_waiting = sum(1 for row in all_party_rows if str(row.get("status")) == "WAITING")
-
-            summary_embed = discord.Embed(
-                title=f"[{raid_name}] 전체 요일 공대 확인",
-                color=discord.Color.blurple(),
-            )
-            summary_embed.add_field(name="전체 저장 행 수", value=str(all_rows_count), inline=False)
-            summary_embed.add_field(name="전체 배정 인원", value=str(total_assigned), inline=False)
-            summary_embed.add_field(name="전체 대기 행 수", value=str(total_waiting), inline=False)
-            summary_embed.set_footer(text="※ 템렙/아툴 점수는 공대 생성 시점 기준입니다.")
-
-            await interaction.followup.send(embed=summary_embed, ephemeral=result_ephemeral)
-
-            for grouped_weekday in sorted(grouped.keys()):
-                weekday_rows = grouped[grouped_weekday]
-                raids, waiting_members = convert_rows_to_raid_structure(weekday_rows)
-
-                embed = build_party_check_embed(
-                    raid_name=raid_name,
-                    weekday=grouped_weekday,
-                    raids=raids,
-                    waiting_members=waiting_members,
-                )
-                text = format_party_check_text_for_weekday(
-                    raid_name=raid_name,
-                    weekday=grouped_weekday,
-                    raids=raids,
-                    waiting_members=waiting_members,
-                )
-
-                await interaction.followup.send(embed=embed, ephemeral=result_ephemeral)
-                await send_long_text_followup(
-                    interaction,
-                    text,
-                    ephemeral=result_ephemeral,
-                )
-            return
-
-        # 보기옵션: 요일
-        if view_option == "요일":
-            weekday_rows = [
-                row for row in all_party_rows
-                if str(row.get("weekday", "")).strip() == weekday
-            ]
-
-            if not weekday_rows:
-                await interaction.followup.send(
-                    f"`{raid_name}` 레이드의 `{weekday}` 공대 생성 내역이 없습니다.",
-                    ephemeral=True,
-                )
-                return
-
-            raids, waiting_members = convert_rows_to_raid_structure(weekday_rows)
-
-            embed = build_party_check_embed(
-                raid_name=raid_name,
-                weekday=weekday,
-                raids=raids,
-                waiting_members=waiting_members,
-            )
-            text = format_party_check_text_for_weekday(
-                raid_name=raid_name,
-                weekday=weekday,
-                raids=raids,
-                waiting_members=waiting_members,
-            )
-
-            await interaction.followup.send(embed=embed, ephemeral=result_ephemeral)
-            await send_long_text_followup(
-                interaction,
-                text,
-                ephemeral=result_ephemeral,
-            )
-            return
-
-        # 보기옵션: 대기
-        weekday_applications = list_raid_applications_by_weekday(
-            guild_id=interaction.guild.id,
-            raid_name=raid_name,
-            weekday=weekday,
-        )
-
-        if not weekday_applications:
-            await interaction.followup.send(
-                f"`{raid_name}` 레이드의 `{weekday}` 신청자가 없습니다.",
-                ephemeral=True,
-            )
-            return
-
-        waiting_candidates, assigned_other_weekday_candidates = split_candidates_for_weekday_display(
-            weekday_applications=weekday_applications,
-            all_party_rows=all_party_rows,
-            target_weekday=weekday,
-        )
-
-        embed = discord.Embed(
-            title=f"[{raid_name}] {weekday} 대기 확인",
-            color=discord.Color.orange(),
-        )
-        embed.add_field(name="대기 인원", value=str(len(waiting_candidates)), inline=False)
-        embed.add_field(name="타 요일 배정 인원", value=str(len(assigned_other_weekday_candidates)), inline=False)
-        embed.set_footer(text="※ 대기는 아직 어떤 요일 공대에도 배정되지 않은 인원만 의미합니다.")
-
-        text = format_waiting_only_text(
-            raid_name=raid_name,
-            weekday=weekday,
-            waiting_members=waiting_candidates,
-            assigned_other_weekday_members=assigned_other_weekday_candidates,
-        )
-
-        await interaction.followup.send(embed=embed, ephemeral=result_ephemeral)
-        await send_long_text_followup(
-            interaction,
-            text,
-            ephemeral=result_ephemeral,
-        )
-
-    except Exception as e:
-        if interaction.response.is_done():
-            await interaction.followup.send(
-                f"공대 확인 중 오류가 발생했습니다.\n`{e}`",
-                ephemeral=True,
-            )
-        else:
-            await interaction.response.send_message(
-                f"공대 확인 중 오류가 발생했습니다.\n`{e}`",
-                ephemeral=True,
-            )
-
-
-# ========================================================
-# /공대초기화
-# ========================================================
-
-# 관리자만 사용 가능
-# 요일 없으면 해당 레이드의 모든 공대가 삭제
-# 요일 있으면 해당 레이드의 해당 요일의 공대만 삭제
 
 @bot.tree.command(name="공대초기화", description="생성된 공대 내역을 초기화합니다.")
-@app_commands.describe(
-    레이드이름="초기화할 레이드 이름",
-    요일="초기화할 요일 (선택)",
-)
-async def reset_parties_command(
-    interaction: discord.Interaction,
-    레이드이름: str,
-    요일: str | None = None,
-):
-    if interaction.guild is None:
-        await interaction.response.send_message(
-            "서버 안에서만 사용할 수 있는 명령어입니다.",
-            ephemeral=True,
-        )
+async def reset_parties_command(interaction: discord.Interaction, 레이드이름: str, 요일: str | None = None):
+    if interaction.guild is None or not is_admin(interaction):
+        await interaction.response.send_message("관리자만 서버 안에서 사용할 수 있습니다.", ephemeral=True)
         return
+    await interaction.response.defer(ephemeral=True)
+    deleted_count = clear_raid_parties(interaction.guild.id, 레이드이름.strip(), 요일.strip() if 요일 else None)
+    await interaction.followup.send(f"초기화 완료: {deleted_count}건 삭제", ephemeral=True)
 
-    if not is_admin(interaction):
-        await interaction.response.send_message(
-            "관리자만 사용할 수 있는 명령어입니다.",
-            ephemeral=True,
-        )
-        return
-
-    레이드이름 = 레이드이름.strip()
-    weekday = 요일.strip() if 요일 else None
-
-    if not 레이드이름:
-        await interaction.response.send_message(
-            "레이드 이름이 비어 있습니다.",
-            ephemeral=True,
-        )
-        return
-
-    if weekday and weekday not in VALID_WEEKDAYS:
-        await interaction.response.send_message(
-            "요일은 월, 화, 수, 목, 금, 토, 일 중 하나여야 합니다.",
-            ephemeral=True,
-        )
-        return
-
-    await interaction.response.defer(ephemeral=True, thinking=True)
-
-    try:
-        raid = get_raid(interaction.guild.id, 레이드이름)
-        if raid is None:
-            await interaction.followup.send(
-                f"`{레이드이름}` 레이드는 존재하지 않습니다.",
-                ephemeral=True,
-            )
-            return
-
-        deleted_count = clear_raid_parties(
-            guild_id=interaction.guild.id,
-            raid_name=레이드이름,
-            weekday=weekday,
-        )
-
-        if weekday:
-            if deleted_count == 0:
-                await interaction.followup.send(
-                    f"`{레이드이름}` 레이드의 `{weekday}` 공대 생성 내역이 없습니다.",
-                    ephemeral=True,
-                )
-                return
-
-            await interaction.followup.send(
-                f"`{레이드이름}` 레이드의 `{weekday}` 공대 생성 내역이 초기화되었습니다.\n"
-                f"- 삭제된 행 수: {deleted_count}\n"
-                "- 신청 원본 내역은 유지됩니다.",
-                ephemeral=True,
-            )
-            return
-
-        if deleted_count == 0:
-            await interaction.followup.send(
-                f"`{레이드이름}` 레이드의 공대 생성 내역이 없습니다.",
-                ephemeral=True,
-            )
-            return
-
-        await interaction.followup.send(
-            f"`{레이드이름}` 레이드의 전체 공대 생성 내역이 초기화되었습니다.\n"
-            f"- 삭제된 행 수: {deleted_count}\n"
-            "- 신청 원본 내역은 유지됩니다.",
-            ephemeral=True,
-        )
-
-    except Exception as e:
-        await interaction.followup.send(
-            f"공대초기화 중 오류가 발생했습니다.\n`{e}`",
-            ephemeral=True,
-        )
-
-
-# ========================================================
-# /공대수정
-# ========================================================
-
-# 관리자만 사용 가능
 
 @bot.tree.command(name="공대수정", description="생성된 공대 내역에서 캐릭터를 이동합니다.")
-@app_commands.describe(
-    레이드이름="수정할 레이드 이름",
-    요일="수정할 요일",
-    캐릭터명="이동할 캐릭터명",
-    공대="이동할 공대 번호",
-    파티="이동할 파티 번호 (1 또는 2)",
-)
-async def update_party_member_command(
-    interaction: discord.Interaction,
-    레이드이름: str,
-    요일: str,
-    캐릭터명: str,
-    공대: int,
-    파티: int,
-):
-    if interaction.guild is None:
-        await interaction.response.send_message(
-            "서버 안에서만 사용할 수 있는 명령어입니다.",
-            ephemeral=True,
-        )
+async def update_party_member_command(interaction: discord.Interaction, 레이드이름: str, 요일: str, 캐릭터명: str, 공대: int, 파티: int):
+    if interaction.guild is None or not is_admin(interaction):
+        await interaction.response.send_message("관리자만 서버 안에서 사용할 수 있습니다.", ephemeral=True)
         return
-
-    if not is_admin(interaction):
-        await interaction.response.send_message(
-            "관리자만 사용할 수 있는 명령어입니다.",
-            ephemeral=True,
-        )
+    await interaction.response.defer(ephemeral=True)
+    rows = list_raid_parties(interaction.guild.id, 레이드이름.strip(), 요일.strip())
+    guild_setting = get_guild_setting(interaction.guild.id)
+    moving_member = None
+    if guild_setting:
+        moving_member = find_matching_generated_member(rows, guild_setting["race_code"], guild_setting["server_code"], 캐릭터명.strip())
+    else:
+        matched = find_matching_generated_members(rows, 캐릭터명.strip())
+        if len(matched) == 1:
+            moving_member = matched[0]
+        elif len(matched) > 1:
+            view = ApplicationRaceServerView(interaction.user.id)
+            await interaction.followup.send("이동할 캐릭터의 종족/서버를 선택하세요.", view=view, ephemeral=True)
+            timeout = await view.wait()
+            if timeout or view.value != "submit":
+                return
+            moving_member = find_matching_generated_member(rows, view.selected_race_code, view.selected_server_code, 캐릭터명.strip())
+    if moving_member is None:
+        await interaction.followup.send("이동할 캐릭터를 찾을 수 없습니다.", ephemeral=True)
         return
-
-    raid_name = 레이드이름.strip()
-    weekday = 요일.strip()
-    character_name = 캐릭터명.strip()
-
-    if not raid_name:
-        await interaction.response.send_message(
-            "레이드 이름이 비어 있습니다.",
-            ephemeral=True,
-        )
+    can_move, reason = can_move_member_to_target(rows, moving_member, 공대, 파티)
+    if not can_move:
+        await interaction.followup.send(reason, ephemeral=True)
         return
-
-    if weekday not in VALID_WEEKDAYS:
-        await interaction.response.send_message(
-            "요일은 월, 화, 수, 목, 금, 토, 일 중 하나여야 합니다.",
-            ephemeral=True,
-        )
-        return
-
-    if not character_name:
-        await interaction.response.send_message(
-            "캐릭터명이 비어 있습니다.",
-            ephemeral=True,
-        )
-        return
-
-    if 공대 < 1:
-        await interaction.response.send_message(
-            "공대 번호는 1 이상이어야 합니다.",
-            ephemeral=True,
-        )
-        return
-
-    if 파티 not in (1, 2):
-        await interaction.response.send_message(
-            "파티 번호는 1 또는 2만 가능합니다.",
-            ephemeral=True,
-        )
-        return
-
-    await interaction.response.defer(ephemeral=True, thinking=True)
-
-    try:
-        raid = get_raid(interaction.guild.id, raid_name)
-        if raid is None:
-            await interaction.followup.send(
-                f"`{raid_name}` 레이드는 존재하지 않습니다.",
-                ephemeral=True,
-            )
+    empty_slot = find_first_empty_slot(rows, 공대, 파티)
+    replaced_member = None
+    replace_mode = None
+    target_slot_no = empty_slot
+    source_weekday = str(moving_member["weekday"])
+    source_raid_no = int(moving_member["raid_no"])
+    source_party_no = moving_member.get("party_no")
+    source_slot_no = moving_member.get("slot_no")
+    source_status = str(moving_member["status"])
+    if empty_slot is not None:
+        update_party_member_position(int(moving_member["id"]), 요일.strip(), 공대, 파티, empty_slot, "ASSIGNED")
+    else:
+        mode_view = PartyReplaceModeView(interaction.user.id)
+        await interaction.followup.send("대상 파티가 가득 찼습니다. 처리 방식을 선택하세요.", view=mode_view, ephemeral=True)
+        timeout = await mode_view.wait()
+        if timeout or mode_view.value in (None, "cancel"):
             return
-
-        rows = list_raid_parties(
-            guild_id=interaction.guild.id,
-            raid_name=raid_name,
-            weekday=weekday,
-        )
-
-        if not rows:
-            await interaction.followup.send(
-                f"`{raid_name}` 레이드의 `{weekday}` 공대 생성 내역이 없습니다.",
-                ephemeral=True,
-            )
+        replace_mode = mode_view.value
+        party_members = list_members_in_party(rows, 공대, 파티)
+        replace_view = PartyReplaceView(interaction.user.id, party_members)
+        await interaction.followup.send("대상 캐릭터를 선택하세요.", view=replace_view, ephemeral=True)
+        timeout = await replace_view.wait()
+        if timeout or replace_view.value != "submit" or replace_view.selected_member_id is None:
             return
-
-        # 1) 이동 대상 캐릭터 찾기
-        guild_setting = get_guild_setting(interaction.guild.id)
-        moving_member = None
-
-        if guild_setting is not None:
-            moving_member = find_matching_generated_member(
-                rows=rows,
-                race_code=str(guild_setting["race_code"]),
-                server_code=str(guild_setting["server_code"]),
-                character_name=character_name,
-            )
-        else:
-            matched = find_matching_generated_members(rows, character_name)
-
-            if not matched:
-                await interaction.followup.send(
-                    f"`{raid_name}` 레이드의 `{weekday}` 공대에서 `{character_name}` 캐릭터를 찾을 수 없습니다.",
-                    ephemeral=True,
-                )
-                return
-
-            if len(matched) == 1:
-                moving_member = matched[0]
-            else:
-                race_server_view = ApplicationRaceServerView(user_id=interaction.user.id)
-                await interaction.followup.send(
-                    f"`{character_name}` 이름의 캐릭터가 여러 종족/서버에 있습니다.\n"
-                    "이동할 캐릭터의 종족/서버를 선택하세요.",
-                    view=race_server_view,
-                    ephemeral=True,
-                )
-
-                timeout = await race_server_view.wait()
-                if timeout:
-                    await interaction.followup.send(
-                        "종족/서버 선택 시간이 초과되었습니다.",
-                        ephemeral=True,
-                    )
-                    return
-
-                if race_server_view.value != "submit":
-                    return
-
-                moving_member = find_matching_generated_member(
-                    rows=rows,
-                    race_code=str(race_server_view.selected_race_code),
-                    server_code=str(race_server_view.selected_server_code),
-                    character_name=character_name,
-                )
-
-        if moving_member is None:
-            await interaction.followup.send(
-                f"`{raid_name}` 레이드의 `{weekday}` 공대에서 `{character_name}` 캐릭터를 찾을 수 없습니다.",
-                ephemeral=True,
-            )
+        replaced_member = next((m for m in party_members if int(m["id"]) == int(replace_view.selected_member_id)), None)
+        if replaced_member is None:
+            await interaction.followup.send("선택한 대상을 찾을 수 없습니다.", ephemeral=True)
             return
-
-        # 2) 이동 가능성 검사
-        can_move, reason = can_move_member_to_target(
-            rows=rows,
-            moving_member=moving_member,
-            target_raid_no=공대,
-            target_party_no=파티,
-        )
-
-        if not can_move:
-            await interaction.followup.send(
-                f"공대 이동 불가: {reason}",
-                ephemeral=True,
-            )
-            return
-
-        # 목표 파티 빈 슬롯 찾기
-        empty_slot = find_first_empty_slot(
-            rows=rows,
-            target_raid_no=공대,
-            target_party_no=파티,
-        )
-
-        replaced_member = None
-        replace_mode = None
-        target_slot_no = None
-
-        source_weekday = str(moving_member["weekday"])
-        source_raid_no = int(moving_member["raid_no"])
-        source_party_no = moving_member.get("party_no")
-        source_slot_no = moving_member.get("slot_no")
-        source_status = str(moving_member["status"])
-
-        # 1) 빈 슬롯 있으면 바로 이동
-        if empty_slot is not None:
-            target_slot_no = empty_slot
-
-            update_party_member_position(
-                party_row_id=int(moving_member["id"]),
-                weekday=weekday,
-                raid_no=공대,
-                party_no=파티,
-                slot_no=target_slot_no,
-                status="ASSIGNED",
-            )
-
-        # 2) 파티가 가득 차면 처리 방식 선택
-        else:
-            mode_view = PartyReplaceModeView(user_id=interaction.user.id)
-            await interaction.followup.send(
-                "대상 파티가 가득 찼습니다. 처리 방식을 선택하세요.",
-                view=mode_view,
-                ephemeral=True,
-            )
-
-            timeout = await mode_view.wait()
-            if timeout:
-                await interaction.followup.send(
-                    "처리 방식 선택 시간이 초과되었습니다.",
-                    ephemeral=True,
-                )
+        if replace_mode == "swap":
+            if raid_has_same_user_after_swap(rows, moving_member, replaced_member, 공대):
+                await interaction.followup.send("교체 후 같은 디스코드 계정의 다른 캐릭터가 남게 되어 이동할 수 없습니다.", ephemeral=True)
                 return
-
-            if mode_view.value in (None, "cancel"):
-                return
-
-            replace_mode = mode_view.value
-
-            party_members = list_members_in_party(
-                rows=rows,
-                raid_no=공대,
-                party_no=파티,
-            )
-
-            replace_view = PartyReplaceView(
-                user_id=interaction.user.id,
-                members=party_members,
-            )
-
-            if replace_mode == "swap":
-                if raid_has_same_user_after_swap(
-                    rows=rows,
-                    moving_member=moving_member,
-                    replaced_member=replaced_member,
-                    target_raid_no=공대,
-                ):
-                    await interaction.followup.send(
-                        "교체 후 대상 공대에 같은 디스코드 계정의 다른 캐릭터가 남게 되어 이동할 수 없습니다.",
-                        ephemeral=True,
-                    )
-                    return
-
-            if replace_mode == "swap":
-                await interaction.followup.send(
-                    "교체할 캐릭터를 선택하세요.",
-                    view=replace_view,
-                    ephemeral=True,
-                )
-            else:
-                await interaction.followup.send(
-                    "대기 인원으로 이동시킬 캐릭터를 선택하세요.",
-                    view=replace_view,
-                    ephemeral=True,
-                )
-
-            timeout = await replace_view.wait()
-            if timeout:
-                await interaction.followup.send(
-                    "대상 캐릭터 선택 시간이 초과되었습니다.",
-                    ephemeral=True,
-                )
-                return
-
-            if replace_view.value != "submit" or replace_view.selected_member_id is None:
-                return
-
-            selected_id = int(replace_view.selected_member_id)
-            for m in party_members:
-                if int(m["id"]) == selected_id:
-                    replaced_member = m
-                    break
-
-            if replaced_member is None:
-                await interaction.followup.send(
-                    "선택한 교체 대상을 찾을 수 없습니다.",
-                    ephemeral=True,
-                )
-                return
-
             target_slot_no = int(replaced_member["slot_no"])
+            swap_party_members_position(
+                int(moving_member["id"]), source_weekday, source_raid_no, source_party_no, source_slot_no, source_status,
+                int(replaced_member["id"]), 요일.strip(), 공대, 파티, target_slot_no, "ASSIGNED",
+            )
+        else:
+            target_slot_no = int(replaced_member["slot_no"])
+            update_party_member_position(int(replaced_member["id"]), 요일.strip(), 공대 + 1, None, None, "WAITING")
+            update_party_member_position(int(moving_member["id"]), 요일.strip(), 공대, 파티, target_slot_no, "ASSIGNED")
+    await interaction.followup.send(embed=build_party_update_embed(레이드이름.strip(), source_weekday, moving_member, 요일.strip(), 공대, 파티 if target_slot_no else None, target_slot_no, replaced_member, replace_mode), ephemeral=False)
+    await interaction.followup.send("공대 수정이 저장되었습니다.", ephemeral=True)
 
-            # 2-1) swap
-            if replace_mode == "swap":
-                swap_party_members_position(
-                    first_row_id=int(moving_member["id"]),
-                    first_weekday=source_weekday,
-                    first_raid_no=source_raid_no,
-                    first_party_no=source_party_no,
-                    first_slot_no=source_slot_no,
-                    first_status=source_status,
-                    second_row_id=int(replaced_member["id"]),
-                    second_weekday=weekday,
-                    second_raid_no=공대,
-                    second_party_no=파티,
-                    second_slot_no=target_slot_no,
-                    second_status="ASSIGNED",
-                )
-
-            # 2-2) 대기 이동
-            elif replace_mode == "waiting":
-                update_party_member_position(
-                    party_row_id=int(replaced_member["id"]),
-                    weekday=weekday,
-                    raid_no=공대,
-                    party_no=None,
-                    slot_no=None,
-                    status="WAITING",
-                )
-
-                update_party_member_position(
-                    party_row_id=int(moving_member["id"]),
-                    weekday=weekday,
-                    raid_no=공대,
-                    party_no=파티,
-                    slot_no=target_slot_no,
-                    status="ASSIGNED",
-                )
-
-
-        # 4) 결과 표시
-        embed = build_party_update_embed(
-            raid_name=raid_name,
-            source_weekday=source_weekday,
-            moved_member=moving_member,
-            target_weekday=weekday,
-            target_raid_no=공대 if replace_mode != "waiting" or target_slot_no is not None else None,
-            target_party_no=파티 if target_slot_no is not None else None,
-            target_slot_no=target_slot_no,
-            replaced_member=replaced_member,
-            replace_mode=replace_mode,
-        )
-
-        await interaction.followup.send(embed=embed, ephemeral=False)
-        await interaction.followup.send(
-            "공대 수정이 저장되었습니다.",
-            ephemeral=True,
-        )
-
-    except Exception as e:
-        await interaction.followup.send(
-            f"공대수정 중 오류가 발생했습니다.\n`{e}`",
-            ephemeral=True,
-        )
-
-
-# =========================================================
-# //공대 규칙 UI 테스트
-# =========================================================
 
 @bot.tree.command(name="공대규칙테스트", description="공대 규칙 UI 테스트")
 async def test_party_rules(interaction: discord.Interaction):
-    if interaction.guild is None:
-        await interaction.response.send_message("서버 안에서만 가능합니다.", ephemeral=True)
-        return
-
-    if not is_admin(interaction):
+    if interaction.guild is None or not is_admin(interaction):
         await interaction.response.send_message("관리자만 가능합니다.", ephemeral=True)
         return
+    view = PartyRuleSetupView(interaction.user.id)
+    await interaction.response.send_message(view.build_summary_text(), view=view, ephemeral=True)
 
-    view = PartyRuleSetupView(user_id=interaction.user.id)
-    await interaction.response.send_message(
-        view.build_summary_text(),
-        view=view,
-        ephemeral=True,
-    )
-
-    timeout = await view.wait()
-    if timeout:
-        return
-
-    if view.value == "submit" and view.exported_rules is not None:
-        await interaction.followup.send(
-            f"규칙 저장 완료\n```python\n{view.exported_rules}\n```",
-            ephemeral=True,
-        )
 
 @bot.event
 async def on_ready():
     init_db()
+    try:
+        await bot.tree.sync()
+    except Exception:
+        pass
     print(f"{bot.user} 로그인 완료")
 
 
