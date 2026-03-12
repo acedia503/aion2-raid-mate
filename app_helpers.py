@@ -71,3 +71,11 @@ def is_admin(interaction: discord.Interaction) -> bool:
     if interaction.guild is None:
         return False
     return bool(interaction.user.guild_permissions.administrator)
+
+
+def make_character_key(row: dict) -> tuple[str, str, str]:
+    return (
+        str(row.get("race_code", "")).strip(),
+        str(row.get("server_code", "")).strip(),
+        str(row.get("character_name", "")).strip().lower(),
+    )
