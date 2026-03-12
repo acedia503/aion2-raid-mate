@@ -115,7 +115,7 @@ CONDITION_TYPE_CHOICES = [
     app_commands.Choice(name="아툴 점수", value="combat_score"),
 ]
 
-PARTY_VIEW_CHOICES = [
+VIEW_OPTION_CHOICES = [
     app_commands.Choice(name="전체", value="전체"),
     app_commands.Choice(name="요일", value="요일"),
     app_commands.Choice(name="대기", value="대기"),
@@ -145,6 +145,86 @@ def make_character_key(row: dict) -> tuple[str, str, str]:
         str(row.get("server_code", "")).strip(),
         str(row.get("character_name", "")).strip().lower(),
     )
+
+
+def split_candidates_for_weekday_display(
+    weekday_applications: list[dict],
+    all_party_rows: list[dict],
+    target_weekday: str,
+) -> tuple[list[dict], list[dict]]:
+    """
+    반환:
+    - waiting_candidates: 해당 요일 신청자 중 어디에도 ASSIGNED 안 된 인원
+    - assigned_other_weekday_candidates: 다른 요일에 ASSIGNED 된 인원
+    """
+    assigned_map: dict[tuple[str, str, str], str] = {}
+
+    for row in all_party_rows:
+        status = str(row.get("status", "")).strip()
+        if status != "ASSIGNED":
+            continue
+
+        key = make_character_key(row)
+        assigned_map[key] = str(row.get("weekday", "")).strip()
+
+    waiting_candidates: list[dict] = []
+    assigned_other_weekday_candidates: list[dict] = []
+
+    for app in weekday_applications:
+        key = make_character_key(app)
+        assigned_weekday = assigned_map.get(key)
+
+        if not assigned_weekday:
+            waiting_candidates.append(app)
+        elif assigned_weekday != target_weekday:
+            copied = dict(app)
+            copied["assigned_weekday"] = assigned_weekday
+            assigned_other_weekday_candidates.append(copied)
+
+    return waiting_candidates, assigned_other_weekday_candidates
+
+
+def format_waiting_only_text(
+    raid_name: str,
+    weekday: str,
+    waiting_members: list[dict],
+    assigned_other_weekday_members: list[dict],
+) -> str:
+    lines: list[str] = []
+    lines.append(f"[{raid_name}] {weekday} 대기 확인")
+    lines.append("")
+
+    lines.append("대기 인원")
+    if waiting_members:
+        for member in waiting_members:
+            lines.append(
+                f"  - {member.get('character_name', '-')} | "
+                f"{member.get('race_name', '-')} / {member.get('server_name', '-')} | "
+                f"{member.get('job_name', '-')} | "
+                f"{member.get('item_level', 0)} | "
+                f"{member.get('combat_score', 0)}"
+            )
+    else:
+        lines.append("  - 없음")
+
+    lines.append("")
+    lines.append("타 요일 배정 인원")
+    if assigned_other_weekday_members:
+        for member in assigned_other_weekday_members:
+            lines.append(
+                f"  - {member.get('character_name', '-')} | "
+                f"{member.get('race_name', '-')} / {member.get('server_name', '-')} | "
+                f"{member.get('job_name', '-')} | "
+                f"{member.get('item_level', 0)} | "
+                f"{member.get('combat_score', 0)} | "
+                f"배정 요일: {member.get('assigned_weekday', '-')}"
+            )
+    else:
+        lines.append("  - 없음")
+
+    lines.append("")
+    lines.append("※ 대기는 해당 요일 신청자 중 아직 어떤 요일 공대에도 배정되지 않은 인원만 의미합니다.")
+    return "\n".join(lines)
 
 
 def exclude_characters_assigned_on_other_weekdays(
@@ -1142,6 +1222,51 @@ async def cancel_application_command(
 
             target = view.selected_application
 
+                generated_rows = list_raid_parties(
+            guild_id=interaction.guild.id,
+            raid_name=레이드이름,
+            weekday=None,
+        )
+
+        already_generated = [
+            row for row in generated_rows
+            if str(row.get("race_code", "")).strip() == str(target.get("race_code", "")).strip()
+            and str(row.get("server_code", "")).strip() == str(target.get("server_code", "")).strip()
+            and str(row.get("character_name", "")).strip() == str(target.get("character_name", "")).strip()
+        ]
+
+        if already_generated:
+            assigned_weekdays = sorted({
+                str(row.get("weekday", "")).strip()
+                for row in already_generated
+                if str(row.get("status", "")).strip() == "ASSIGNED"
+            })
+
+            waiting_weekdays = sorted({
+                str(row.get("weekday", "")).strip()
+                for row in already_generated
+                if str(row.get("status", "")).strip() == "WAITING"
+            })
+
+            lines = [
+                "이미 공대 생성에 반영된 신청 내역이라 바로 취소할 수 없습니다.",
+                "이번 주 변동사항이면 관리자에게 문의해주세요.",
+                "관리자는 `/공대수정` 또는 `/공대초기화` 후 재생성으로 처리할 수 있습니다.",
+            ]
+
+            if assigned_weekdays:
+                lines.append(f"- 배정 요일: {', '.join(assigned_weekdays)}")
+            if waiting_weekdays:
+                lines.append(f"- 대기 행 존재 요일: {', '.join(waiting_weekdays)}")
+
+            lines.append("수정된 신청 내용은 다음 주 공대 생성부터 반영됩니다.")
+
+            await interaction.followup.send(
+                "\n".join(lines),
+                ephemeral=True,
+            )
+            return
+            
         deleted = delete_application(int(target["id"]))
         if not deleted:
             await interaction.followup.send(
@@ -1220,6 +1345,28 @@ async def force_delete_application_command(
         # 1건이면 바로 삭제
         if len(matched) == 1:
             target = matched[0]
+
+            generated_rows = list_raid_parties(
+                guild_id=interaction.guild.id,
+                raid_name=레이드이름,
+                weekday=None,
+            )
+
+            already_generated = [
+                row for row in generated_rows
+                if str(row.get("race_code", "")).strip() == str(target.get("race_code", "")).strip()
+                and str(row.get("server_code", "")).strip() == str(target.get("server_code", "")).strip()
+                and str(row.get("character_name", "")).strip() == str(target.get("character_name", "")).strip()
+            ]
+
+            if already_generated:
+                await interaction.followup.send(
+                    "이미 공대 생성에 반영된 신청 내역이라 강제삭제할 수 없습니다.\n"
+                    "이번 주 변동사항이면 `/공대수정` 또는 `/공대초기화` 후 재생성으로 처리해주세요.",
+                    ephemeral=True,
+                )
+                return
+
             deleted = delete_application(int(target["id"]))
 
             if deleted:
@@ -1258,7 +1405,29 @@ async def force_delete_application_command(
         if view.value != "submit" or view.selected_application is None:
             return
 
-        target = view.selected_application
+                target = view.selected_application
+
+        generated_rows = list_raid_parties(
+            guild_id=interaction.guild.id,
+            raid_name=레이드이름,
+            weekday=None,
+        )
+
+        already_generated = [
+            row for row in generated_rows
+            if str(row.get("race_code", "")).strip() == str(target.get("race_code", "")).strip()
+            and str(row.get("server_code", "")).strip() == str(target.get("server_code", "")).strip()
+            and str(row.get("character_name", "")).strip() == str(target.get("character_name", "")).strip()
+        ]
+
+        if already_generated:
+            await interaction.followup.send(
+                "이미 공대 생성에 반영된 신청 내역이라 강제삭제할 수 없습니다.\n"
+                "이번 주 변동사항이면 `/공대수정` 또는 `/공대초기화` 후 재생성으로 처리해주세요.",
+                ephemeral=True,
+            )
+            return
+
         deleted = delete_application(int(target["id"]))
 
         if deleted:
@@ -1788,9 +1957,9 @@ async def create_parties_command(
 @app_commands.describe(
     레이드이름="확인할 레이드 이름",
     보기옵션="전체 / 요일 / 대기",
-    요일="확인할 요일 (보기옵션이 요일 또는 대기일 때 사용)",
+    요일="보기옵션이 '요일' 또는 '대기'일 때 사용할 요일",
 )
-@app_commands.choices(보기옵션=PARTY_VIEW_CHOICES)
+@app_commands.choices(보기옵션=VIEW_OPTION_CHOICES)
 async def check_parties_command(
     interaction: discord.Interaction,
     레이드이름: str,
@@ -1805,7 +1974,7 @@ async def check_parties_command(
         return
 
     raid_name = 레이드이름.strip()
-    view_option = 보기옵션.value.strip()
+    view_option = 보기옵션.value
     weekday = 요일.strip() if 요일 else None
 
     if not raid_name:
@@ -1815,19 +1984,20 @@ async def check_parties_command(
         )
         return
 
-    if weekday and weekday not in VALID_WEEKDAYS:
-        await interaction.response.send_message(
-            "요일은 월, 화, 수, 목, 금, 토, 일 중 하나여야 합니다.",
-            ephemeral=True,
-        )
-        return
+    if view_option in ("요일", "대기"):
+        if not weekday:
+            await interaction.response.send_message(
+                f"보기옵션이 `{view_option}`일 때는 요일을 함께 입력해야 합니다.",
+                ephemeral=True,
+            )
+            return
 
-    if view_option == "요일" and not weekday:
-        await interaction.response.send_message(
-            "보기옵션이 `요일`이면 요일도 함께 입력해야 합니다.",
-            ephemeral=True,
-        )
-        return
+        if weekday not in VALID_WEEKDAYS:
+            await interaction.response.send_message(
+                "요일은 월, 화, 수, 목, 금, 토, 일 중 하나여야 합니다.",
+                ephemeral=True,
+            )
+            return
 
     try:
         if is_admin(interaction):
@@ -1842,7 +2012,7 @@ async def check_parties_command(
             if timeout:
                 return
 
-            if view.value == "cancel" or view.value is None:
+            if view.value in (None, "cancel"):
                 return
 
             result_ephemeral = (view.value != "public")
@@ -1850,28 +2020,27 @@ async def check_parties_command(
             await interaction.response.defer(ephemeral=True, thinking=True)
             result_ephemeral = True
 
-        # =========================================
-        # 1) 전체 보기
-        # =========================================
-        if view_option == "전체":
-            rows = list_raid_parties(
-                guild_id=interaction.guild.id,
-                raid_name=raid_name,
-                weekday=None,
-            )
+        # 전체 공대 row
+        all_party_rows = list_raid_parties(
+            guild_id=interaction.guild.id,
+            raid_name=raid_name,
+            weekday=None,
+        )
 
-            if not rows:
+        # 보기옵션: 전체
+        if view_option == "전체":
+            if not all_party_rows:
                 await interaction.followup.send(
                     f"`{raid_name}` 레이드의 공대 생성 내역이 없습니다.",
                     ephemeral=True,
                 )
                 return
 
-            grouped = group_party_rows_by_weekday(rows)
+            grouped = group_party_rows_by_weekday(all_party_rows)
 
-            all_rows_count = len(rows)
-            total_assigned = sum(1 for row in rows if str(row.get("status")) == "ASSIGNED")
-            total_waiting = sum(1 for row in rows if str(row.get("status")) == "WAITING")
+            all_rows_count = len(all_party_rows)
+            total_assigned = sum(1 for row in all_party_rows if str(row.get("status")) == "ASSIGNED")
+            total_waiting = sum(1 for row in all_party_rows if str(row.get("status")) == "WAITING")
 
             summary_embed = discord.Embed(
                 title=f"[{raid_name}] 전체 요일 공대 확인",
@@ -1879,7 +2048,7 @@ async def check_parties_command(
             )
             summary_embed.add_field(name="전체 저장 행 수", value=str(all_rows_count), inline=False)
             summary_embed.add_field(name="전체 배정 인원", value=str(total_assigned), inline=False)
-            summary_embed.add_field(name="전체 대기 인원", value=str(total_waiting), inline=False)
+            summary_embed.add_field(name="전체 대기 행 수", value=str(total_waiting), inline=False)
             summary_embed.set_footer(text="※ 템렙/아툴 점수는 공대 생성 시점 기준입니다.")
 
             await interaction.followup.send(embed=summary_embed, ephemeral=result_ephemeral)
@@ -1909,24 +2078,21 @@ async def check_parties_command(
                 )
             return
 
-        # =========================================
-        # 2) 요일 보기
-        # =========================================
+        # 보기옵션: 요일
         if view_option == "요일":
-            rows = list_raid_parties(
-                guild_id=interaction.guild.id,
-                raid_name=raid_name,
-                weekday=weekday,
-            )
+            weekday_rows = [
+                row for row in all_party_rows
+                if str(row.get("weekday", "")).strip() == weekday
+            ]
 
-            if not rows:
+            if not weekday_rows:
                 await interaction.followup.send(
                     f"`{raid_name}` 레이드의 `{weekday}` 공대 생성 내역이 없습니다.",
                     ephemeral=True,
                 )
                 return
 
-            raids, waiting_members = convert_rows_to_raid_structure(rows)
+            raids, waiting_members = convert_rows_to_raid_structure(weekday_rows)
 
             embed = build_party_check_embed(
                 raid_name=raid_name,
@@ -1949,107 +2115,47 @@ async def check_parties_command(
             )
             return
 
-        # =========================================
-        # 3) 대기 보기
-        # =========================================
-        if view_option == "대기":
-            waiting_rows = list_waiting_party_members(
-                guild_id=interaction.guild.id,
-                raid_name=raid_name,
-                weekday=weekday,
+        # 보기옵션: 대기
+        weekday_applications = list_raid_applications_by_weekday(
+            guild_id=interaction.guild.id,
+            raid_name=raid_name,
+            weekday=weekday,
+        )
+
+        if not weekday_applications:
+            await interaction.followup.send(
+                f"`{raid_name}` 레이드의 `{weekday}` 신청자가 없습니다.",
+                ephemeral=True,
             )
-
-            if not waiting_rows:
-                if weekday:
-                    await interaction.followup.send(
-                        f"`{raid_name}` 레이드의 `{weekday}` 대기 인원이 없습니다.",
-                        ephemeral=True,
-                    )
-                else:
-                    await interaction.followup.send(
-                        f"`{raid_name}` 레이드의 전체 대기 인원이 없습니다.",
-                        ephemeral=True,
-                    )
-                return
-
-            grouped = group_party_rows_by_weekday(waiting_rows)
-
-            if weekday:
-                target_rows = grouped.get(weekday, [])
-                if not target_rows:
-                    await interaction.followup.send(
-                        f"`{raid_name}` 레이드의 `{weekday}` 대기 인원이 없습니다.",
-                        ephemeral=True,
-                    )
-                    return
-
-                lines = [f"[{raid_name}] {weekday} 대기 인원", ""]
-                for row in target_rows:
-                    lines.append(
-                        f"- {row.get('character_name', '-')} | "
-                        f"{row.get('race_name', '-')} / {row.get('server_name', '-')} | "
-                        f"{row.get('job_name', '-')} | "
-                        f"{row.get('item_level', 0)} | "
-                        f"{row.get('combat_score', 0)}"
-                    )
-
-                embed = discord.Embed(
-                    title=f"[{raid_name}] {weekday} 대기 인원",
-                    color=discord.Color.orange(),
-                )
-                embed.add_field(name="대기 인원 수", value=str(len(target_rows)), inline=False)
-                embed.set_footer(text="※ 대기 인원은 해당 요일 공대에 배정되지 않은 신청자입니다.")
-
-                await interaction.followup.send(embed=embed, ephemeral=result_ephemeral)
-                await send_long_text_followup(
-                    interaction,
-                    "\n".join(lines),
-                    ephemeral=result_ephemeral,
-                )
-                return
-
-            # 전체 대기
-            summary_embed = discord.Embed(
-                title=f"[{raid_name}] 전체 대기 인원",
-                color=discord.Color.orange(),
-            )
-            summary_embed.add_field(
-                name="전체 대기 인원 수",
-                value=str(len(waiting_rows)),
-                inline=False,
-            )
-            summary_embed.set_footer(text="※ 대기 인원은 각 요일 공대에 배정되지 않은 신청자입니다.")
-
-            await interaction.followup.send(embed=summary_embed, ephemeral=result_ephemeral)
-
-            for grouped_weekday in sorted(grouped.keys()):
-                lines = [f"[{raid_name}] {grouped_weekday} 대기 인원", ""]
-                for row in grouped[grouped_weekday]:
-                    lines.append(
-                        f"- {row.get('character_name', '-')} | "
-                        f"{row.get('race_name', '-')} / {row.get('server_name', '-')} | "
-                        f"{row.get('job_name', '-')} | "
-                        f"{row.get('item_level', 0)} | "
-                        f"{row.get('combat_score', 0)}"
-                    )
-
-                embed = discord.Embed(
-                    title=f"[{raid_name}] {grouped_weekday} 대기 인원",
-                    color=discord.Color.orange(),
-                )
-                embed.add_field(
-                    name="대기 인원 수",
-                    value=str(len(grouped[grouped_weekday])),
-                    inline=False,
-                )
-
-                await interaction.followup.send(embed=embed, ephemeral=result_ephemeral)
-                await send_long_text_followup(
-                    interaction,
-                    "\n".join(lines),
-                    ephemeral=result_ephemeral,
-                )
             return
+
+        waiting_candidates, assigned_other_weekday_candidates = split_candidates_for_weekday_display(
+            weekday_applications=weekday_applications,
+            all_party_rows=all_party_rows,
+            target_weekday=weekday,
+        )
+
+        embed = discord.Embed(
+            title=f"[{raid_name}] {weekday} 대기 확인",
+            color=discord.Color.orange(),
+        )
+        embed.add_field(name="대기 인원", value=str(len(waiting_candidates)), inline=False)
+        embed.add_field(name="타 요일 배정 인원", value=str(len(assigned_other_weekday_candidates)), inline=False)
+        embed.set_footer(text="※ 대기는 아직 어떤 요일 공대에도 배정되지 않은 인원만 의미합니다.")
+
+        text = format_waiting_only_text(
+            raid_name=raid_name,
+            weekday=weekday,
+            waiting_members=waiting_candidates,
+            assigned_other_weekday_members=assigned_other_weekday_candidates,
+        )
+
+        await interaction.followup.send(embed=embed, ephemeral=result_ephemeral)
+        await send_long_text_followup(
+            interaction,
+            text,
+            ephemeral=result_ephemeral,
+        )
 
     except Exception as e:
         if interaction.response.is_done():
@@ -2062,6 +2168,7 @@ async def check_parties_command(
                 f"공대 확인 중 오류가 발생했습니다.\n`{e}`",
                 ephemeral=True,
             )
+
 
 # ========================================================
 # /공대초기화
