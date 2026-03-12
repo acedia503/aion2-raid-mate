@@ -6,13 +6,12 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from app_helpers import format_days, is_admin
+from app_helpers import format_days, is_admin, make_character_key
 from application_views import (
     ApplicationCancelView,
     ApplicationRaceServerView,
     ForceDeleteRaceServerView,
     WeekdayMultiSelectView,
-    make_character_key,
 )
 from atool import AtoolError, get_character_info
 from constants import RACE_OPTIONS, SERVER_OPTIONS, VALID_WEEKDAYS
