@@ -19,13 +19,19 @@ class ApplicationRaceServerView(discord.ui.View):
         self.server_select: ApplicationServerSelect | None = None
         self.add_item(self.race_select)
 
-    def refresh_server_select(self) -> None:
-        if self.server_select is not None:
-            self.remove_item(self.server_select)
-            self.server_select = None
+    def refresh_components(self) -> None:
+        for item in list(self.children):
+            if isinstance(item, (ApplicationRaceSelect, ApplicationServerSelect)):
+                self.remove_item(item)
+    
+        self.race_select = ApplicationRaceSelect(self)
+        self.add_item(self.race_select)
+    
         if self.selected_race_code:
             self.server_select = ApplicationServerSelect(self, self.selected_race_code)
             self.add_item(self.server_select)
+        else:
+            self.server_select = None
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.user_id:
@@ -66,10 +72,27 @@ class ApplicationRaceServerView(discord.ui.View):
 
 
 class ApplicationRaceSelect(discord.ui.Select):
-    def __init__(self, parent_view: ApplicationRaceServerView):
+    def __init__(self, parent_view: "ApplicationRaceServerView"):
         self.parent_view = parent_view
-        options = [discord.SelectOption(label=race["name"], value=race["code"]) for race in RACE_OPTIONS]
-        super().__init__(placeholder="아이온2 종족을 선택하세요", min_values=1, max_values=1, options=options, row=0)
+
+        selected_code = parent_view.selected_race_code
+
+        options = [
+            discord.SelectOption(
+                label=race["name"],
+                value=race["code"],
+                default=(race["code"] == selected_code),
+            )
+            for race in RACE_OPTIONS
+        ]
+
+        super().__init__(
+            placeholder="아이온2 종족을 선택하세요",
+            min_values=1,
+            max_values=1,
+            options=options,
+            row=0,
+        )
 
     async def callback(self, interaction: discord.Interaction):
         selected_code = self.values[0]
@@ -81,7 +104,7 @@ class ApplicationRaceSelect(discord.ui.Select):
         self.parent_view.selected_race_name = selected_race["name"]
         self.parent_view.selected_server_code = None
         self.parent_view.selected_server_name = None
-        self.parent_view.refresh_server_select()
+        self.parent_view.refresh_components()
         await interaction.response.edit_message(
             content=f"종족: **{self.parent_view.selected_race_name}** 선택됨\n이제 종족 서버를 선택하세요.",
             view=self.parent_view,
