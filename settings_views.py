@@ -12,33 +12,39 @@ class GuildSettingView(discord.ui.View):
         super().__init__(timeout=180)
         self.guild_id = guild_id
         self.user_id = user_id
+
         self.selected_race_code: str | None = None
         self.selected_race_name: str | None = None
         self.selected_server_code: str | None = None
         self.selected_server_name: str | None = None
+
         self.race_select = RaceSelect(self)
         self.server_select: ServerSelect | None = None
+
         self.add_item(self.race_select)
 
-    def refresh_components(self) -> None:
-        for item in list(self.children):
-            if isinstance(item, (RaceSelect, ServerSelect)):
-                self.remove_item(item)
-    
-        self.race_select = RaceSelect(self)
-        self.add_item(self.race_select)
-    
+    def refresh_server_select(self) -> None:
+        if self.server_select is not None:
+            self.remove_item(self.server_select)
+            self.server_select = None
+
         if self.selected_race_code:
             self.server_select = ServerSelect(self, self.selected_race_code)
             self.add_item(self.server_select)
-        else:
-            self.server_select = None
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("이 설정 UI는 명령어를 실행한 관리자만 사용할 수 있습니다.", ephemeral=True)
+            await interaction.response.send_message(
+                "이 설정 UI는 명령어를 실행한 관리자만 사용할 수 있습니다.",
+                ephemeral=True,
+            )
             return False
         return True
+
+    async def on_timeout(self) -> None:
+        for item in self.children:
+            item.disabled = True
+        self.stop()
 
     @discord.ui.button(label="저장", style=discord.ButtonStyle.success, row=2)
     async def save_button(self, interaction: discord.Interaction, _: discord.ui.Button):
@@ -66,27 +72,22 @@ class GuildSettingView(discord.ui.View):
 
 
 class RaceSelect(discord.ui.Select):
-    def __init__(self, parent_view: "GuildSettingView"):
+    def __init__(self, parent_view: GuildSettingView):
         self.parent_view = parent_view
+        options = [discord.SelectOption(label=race["name"], value=race["code"]) for race in RACE_OPTIONS]
+        super().__init__(placeholder="아이온2 종족을 선택하세요", min_values=1, max_values=1, options=options, row=0)
 
-        selected_code = parent_view.selected_race_code
-
-        options = [
-            discord.SelectOption(
-                label=race["name"],
-                value=race["code"],
-                default=(race["code"] == selected_code),
-            )
-            for race in RACE_OPTIONS
-        ]
-
-        super().__init__(
-            placeholder="아이온2 종족을 선택하세요",
-            min_values=1,
-            max_values=1,
-            options=options,
-            row=0,
-        )
+    async def callback(self, interaction: discord.Interaction):
+        selected = next((r for r in RACE_OPTIONS if r["code"] == self.values[0]), None)
+        if selected is None:
+            await interaction.response.send_message("선택한 종족 정보를 찾을 수 없습니다.", ephemeral=True)
+            return
+        self.parent_view.selected_race_code = selected["code"]
+        self.parent_view.selected_race_name = selected["name"]
+        self.parent_view.selected_server_code = None
+        self.parent_view.selected_server_name = None
+        self.parent_view.refresh_server_select()
+        await interaction.response.edit_message(content=f"종족: **{selected['name']}** 선택됨\n이제 종족 서버를 선택하세요.", view=self.parent_view)
 
 
 class ServerSelect(discord.ui.Select):
@@ -108,7 +109,6 @@ class ServerSelect(discord.ui.Select):
             content=f"종족: **{self.parent_view.selected_race_name}**\n종족 서버: **{selected['name']}**\n저장 버튼을 눌러 설정을 저장하세요.",
             view=self.parent_view,
         )
-
 
 class RaidDeleteConfirmView(discord.ui.View):
     def __init__(self, guild_id: int, raid_name: str, user_id: int):
