@@ -89,8 +89,7 @@ VIEW_OPTION_CHOICES = [
 ]
 
 
-def build_default_all_slot_rules() -> list[dict]:
-    return [{"slot_index": i, "role_type": "ALL", "preferred_jobs": []} for i in range(1, 9)]
+
 
 
 def make_character_key(row: dict) -> tuple[str, str, str]:
