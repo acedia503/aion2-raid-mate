@@ -254,9 +254,9 @@ def convert_rows_to_raid_structure(rows: list[dict]) -> tuple[list[dict], list[d
             waiting_members.append(member)
             continue
 
-        raid_no = int(row.get("raid_no", 0))
-        party_no = int(row.get("party_no", 0))
-        slot_no = int(row.get("slot_no", 0))
+        raid_no = safe_int(row.get("raid_no", 0))
+        party_no = safe_int(row.get("party_no", 0))
+        slot_no = safe_int(row.get("slot_no", 0))
 
         if raid_no not in raid_map:
             raid_map[raid_no] = {
