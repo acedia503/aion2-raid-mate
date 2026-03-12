@@ -138,16 +138,76 @@ def build_default_all_slot_rules() -> list[dict]:
         {"slot_index": 8, "role_type": "ALL", "preferred_jobs": []},
     ]
 
-# Atool 재조회
-def refresh_candidates_for_party_generation(candidates: list[dict]) -> tuple[list[dict], list[str]]:
+
+def make_character_key(row: dict) -> tuple[str, str, str]:
+    return (
+        str(row.get("race_code", "")).strip(),
+        str(row.get("server_code", "")).strip(),
+        str(row.get("character_name", "")).strip().lower(),
+    )
+
+
+def exclude_characters_assigned_on_other_weekdays(
+    candidates: list[dict],
+    all_party_rows: list[dict],
+    target_weekday: str,
+) -> tuple[list[dict], list[str]]:
+    assigned_other_weekdays: dict[tuple[str, str, str], str] = {}
+
+    for row in all_party_rows:
+        status = str(row.get("status", "")).strip()
+        weekday = str(row.get("weekday", "")).strip()
+
+        if status != "ASSIGNED":
+            continue
+        if weekday == target_weekday:
+            continue
+
+        key = make_character_key(row)
+        assigned_other_weekdays[key] = weekday
+
+    filtered: list[dict] = []
+    notices: list[str] = []
+
+    for candidate in candidates:
+        key = make_character_key(candidate)
+        other_weekday = assigned_other_weekdays.get(key)
+
+        if other_weekday:
+            notices.append(
+                f"타 요일 배정 제외: {candidate['character_name']} | {other_weekday}"
+            )
+            continue
+
+        filtered.append(candidate)
+
+    return filtered, notices
+
+
+def refresh_candidates_for_party_generation_optimized(
+    candidates: list[dict],
+) -> tuple[list[dict], list[str]]:
     """
-    후보 전원을 공대 생성 시점 기준으로 재조회.
-    실패한 경우는 기존 값 유지하고 warning만 남긴다.
+    공대 생성 시점 기준 아툴 재조회.
+    - 같은 캐릭터 키는 1번만 재조회
+    - 결과를 map에 저장 후 재사용
     """
     refreshed_candidates: list[dict] = []
     warnings: list[str] = []
+    refreshed_map: dict[tuple[str, str, str], dict] = {}
+
+    unique_targets: list[dict] = []
+    seen_keys: set[tuple[str, str, str]] = set()
 
     for candidate in candidates:
+        key = make_character_key(candidate)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        unique_targets.append(candidate)
+
+    for candidate in unique_targets:
+        key = make_character_key(candidate)
         original_score = int(candidate.get("combat_score", 0))
         original_level = int(candidate.get("item_level", 0))
 
@@ -187,7 +247,11 @@ def refresh_candidates_for_party_generation(candidates: list[dict]) -> tuple[lis
                 f"재조회 오류(기존값 유지): {candidate['character_name']} | {e}"
             )
 
-        refreshed_candidates.append(refreshed)
+        refreshed_map[key] = refreshed
+
+    for candidate in candidates:
+        key = make_character_key(candidate)
+        refreshed_candidates.append(dict(refreshed_map.get(key, candidate)))
 
     return refreshed_candidates, warnings
 
@@ -1555,68 +1619,48 @@ async def create_parties_command(
             )
             return
 
-        # 3) 같은 요일 이미 생성된 공대 내역 조회
-        existing_rows = list_raid_parties(
+        # 3) 같은 레이드의 전체 공대 내역 조회
+        all_party_rows = list_raid_parties(
             guild_id=interaction.guild.id,
             raid_name=raid_name,
-            weekday=weekday,
+            weekday=None,
         )
-
-        # 4) 같은 요일에 이미 생성된 캐릭터 제외
-        candidates = exclude_already_generated_characters(applications, existing_rows)
-
-        # 5) 다른 요일에 이미 배정된 캐릭터 분리
-        other_weekday_assigned_rows = list_other_weekday_assigned_members(
-            guild_id=interaction.guild.id,
-            raid_name=raid_name,
-            weekday=weekday,
-        )
-
-        candidates, cross_weekday_members = split_members_already_assigned_other_weekday(
+        
+        # 4) 이미 해당 요일에 생성된 캐릭터 제외
+        existing_same_weekday_rows = [
+            row for row in all_party_rows
+            if str(row.get("weekday", "")).strip() == weekday
+        ]
+        
+        candidates = exclude_already_generated_characters(applications, existing_same_weekday_rows)
+        
+        # 5) 다른 요일 공대에 이미 배정된 캐릭터 제외
+        candidates, other_weekday_notices = exclude_characters_assigned_on_other_weekdays(
             candidates=candidates,
-            other_weekday_assigned_rows=other_weekday_assigned_rows,
+            all_party_rows=all_party_rows,
+            target_weekday=weekday,
         )
 
         # 6) 생성 후보가 하나도 없을 때
         if not candidates:
-            if cross_weekday_members:
-                source_note = "타 요일에 이미 배정된 캐릭터는 이번 생성에서 제외됩니다."
-                text = format_raid_result_text(
-                    raid_name=raid_name,
-                    weekday=weekday,
-                    raids=[],
-                    waiting_members=[],
-                    cross_weekday_members=cross_weekday_members,
-                    source_note=source_note,
-                )
-
-                embed = build_raid_result_embed(
-                    raid_name=raid_name,
-                    weekday=weekday,
-                    raids=[],
-                    waiting_members=[],
-                    cross_weekday_members=cross_weekday_members,
-                    source_note=source_note,
-                )
-
-                await interaction.followup.send(
-                    f"`{raid_name}` 레이드의 `{weekday}` 신청자는 모두 다른 요일 공대에 이미 배정되어 있습니다.",
-                    ephemeral=True,
-                )
-                await interaction.followup.send(embed=embed, ephemeral=True)
-                await send_long_text_followup(interaction, text, ephemeral=True)
-                return
-
+            extra_lines: list[str] = [
+                f"`{raid_name}` 레이드의 `{weekday}` 신청자 중 새로 생성할 수 있는 캐릭터가 없습니다."
+            ]
+        
+            if other_weekday_notices:
+                preview = "\n".join(f"- {text}" for text in other_weekday_notices[:10])
+                extra_lines.append("")
+                extra_lines.append("타 요일 배정 제외 내역")
+                extra_lines.append(f"```text\n{preview}\n```")
+        
             await interaction.followup.send(
-                f"`{raid_name}` 레이드의 `{weekday}` 신청자 중 "
-                "새로 생성할 수 있는 캐릭터가 없습니다.\n"
-                "이미 해당 요일 공대에 모두 포함되어 있을 수 있습니다.",
+                "\n".join(extra_lines),
                 ephemeral=True,
             )
             return
 
         # 7) 공대 생성 시점 기준 아툴 재조회
-        refreshed_candidates, refresh_warnings = refresh_candidates_for_party_generation(candidates)
+        refreshed_candidates, refresh_warnings = refresh_candidates_for_party_generation_optimized(candidates)
 
         # 8) 기존 규칙 불러오기
         initial_rules = load_party_rules(interaction.guild.id, raid_name)
@@ -1713,7 +1757,8 @@ async def create_parties_command(
         await interaction.followup.send(embed=embed, ephemeral=False)
         await send_long_text_followup(interaction, text, ephemeral=False)
 
-        all_warnings: list[str] = []
+        all_warnings = []
+        all_warnings.extend(other_weekday_notices)
         all_warnings.extend(refresh_warnings)
         all_warnings.extend(warnings)
 
