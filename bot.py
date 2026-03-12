@@ -27,6 +27,7 @@ from party_helpers import (
     raid_has_same_user_after_swap,
     split_members_already_assigned_other_weekday,
     build_default_all_slot_rules,
+    refresh_candidates_for_party_generation_optimized,
 )
 from party_views import (
     PartyConfirmVisibilityView,
@@ -91,38 +92,12 @@ VIEW_OPTION_CHOICES = [
 ]
 
 
-
-
-
-
-
-
 def find_generated_rows_for_target(generated_rows: list[dict], target: dict) -> list[dict]:
     key = make_character_key(target)
     return [row for row in generated_rows if make_character_key(row) == key]
 
 
 
-
-
-def format_waiting_only_text(raid_name: str, weekday: str, waiting_members: list[dict], assigned_other_weekday_members: list[dict]) -> str:
-    lines = [f"[{raid_name}] {weekday} 대기 확인", "", "대기 인원"]
-    if waiting_members:
-        for member in waiting_members:
-            lines.append(
-                f"  - {member.get('character_name', '-')} | {member.get('race_name', '-')} / {member.get('server_name', '-')} | {member.get('job_name', '-')} | {member.get('item_level', 0)} | {member.get('combat_score', 0)}"
-            )
-    else:
-        lines.append("  - 없음")
-    lines.extend(["", "타 요일 배정 인원"])
-    if assigned_other_weekday_members:
-        for member in assigned_other_weekday_members:
-            lines.append(
-                f"  - {member.get('character_name', '-')} | {member.get('race_name', '-')} / {member.get('server_name', '-')} | 배정 요일: {member.get('assigned_weekday', '-')}"
-            )
-    else:
-        lines.append("  - 없음")
-    return "\n".join(lines)
 
 
 intents = discord.Intents.default()
