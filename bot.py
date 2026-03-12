@@ -77,6 +77,7 @@ from ui_helpers import (
     format_raid_result_text,
     group_applications_by_raid,
     send_long_text_followup,
+    format_waiting_only_text,
 )
 
 RACE_CHOICES = [app_commands.Choice(name=item["name"], value=item["code"]) for item in RACE_OPTIONS]
