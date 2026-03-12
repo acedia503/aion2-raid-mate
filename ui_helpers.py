@@ -183,6 +183,7 @@ def format_raid_result_text(
     weekday: str,
     raids: list[dict],
     waiting_members: list[dict],
+    cross_weekday_members: list[dict] | None = None,
     source_note: str | None = None,
 ) -> str:
     lines: list[str] = []
@@ -224,6 +225,22 @@ def format_raid_result_text(
     else:
         lines.append("  - 없음")
 
+    lines.append("")
+    lines.append("타 요일 배정 인원")
+    if cross_weekday_members:
+        for member in cross_weekday_members:
+            lines.append(
+                "  - "
+                f"{member.get('character_name', '-')} | "
+                f"{member.get('race_name', '-')} / {member.get('server_name', '-')} | "
+                f"{member.get('assigned_weekday', '-')} "
+                f"{member.get('assigned_raid_no', '-')}공대 "
+                f"{member.get('assigned_party_no', '-')}파티 "
+                f"{member.get('assigned_slot_no', '-')}번"
+            )
+    else:
+        lines.append("  - 없음")
+
     if source_note:
         lines.append("")
         lines.append(f"※ {source_note}")
@@ -248,6 +265,7 @@ def build_raid_result_embed(
     embed.add_field(name="생성 공대 수", value=str(len(raids)), inline=False)
     embed.add_field(name="배정 인원", value=str(assigned_count), inline=False)
     embed.add_field(name="대기 인원", value=str(waiting_count), inline=False)
+    embed.add_field(name="타 요일 배정 인원", value=str(len(cross_weekday_members or [])), inline=False)
 
     if source_note:
         embed.set_footer(text=source_note)
