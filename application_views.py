@@ -318,31 +318,31 @@ class WeekdaySelect(discord.ui.Select):
     def __init__(self, parent_view: "WeekdayMultiSelectView"):
         self.parent_view = parent_view
 
-    options = [
-        discord.SelectOption(label=day["name"], value=day["value"])
-        for day in WEEKDAY_OPTIONS
-    ]
-    
-    super().__init__(
-        placeholder="가능 요일을 선택하세요 (중복 선택 가능)",
-        min_values=1,
-        max_values=7,
-        options=options,
-        row=0,
-    )
+        options = [
+            discord.SelectOption(
+                label=day["name"],
+                value=day["value"],
+                default=(day["value"] in parent_view.selected_days),
+            )
+            for day in WEEKDAY_OPTIONS
+        ]
+
+        super().__init__(
+            placeholder="가능 요일을 선택하세요 (중복 선택 가능)",
+            min_values=1,
+            max_values=7,
+            options=options,
+            row=0,
+        )
 
     async def callback(self, interaction: discord.Interaction):
-        if interaction.user.id != self.parent_view.user_id:
-            await interaction.response.send_message(
-                "이 신청 UI는 명령어를 실행한 사용자만 사용할 수 있습니다.",
-                ephemeral=True,
-            )
-            return
-
         self.parent_view.selected_days = list(self.values)
 
         await interaction.response.edit_message(
-            content=self.parent_view.build_summary_text(saved=False, note_entered=bool(self.parent_view.note)),
+            content=self.parent_view.build_summary_text(
+                saved=False,
+                note_entered=bool(self.parent_view.note),
+            ),
             view=self.parent_view,
         )
 
@@ -379,6 +379,106 @@ class ApplicationNoteModal(discord.ui.Modal, title="특이사항 입력"):
             view=self.parent_view,
         )
         self.parent_view.stop()
+
+
+# =========================================================
+# 신청취소용 종족/서버 선택 UI
+# =========================================================
+
+class ApplicationCancelSelect(discord.ui.Select):
+    def __init__(self, parent_view: "ApplicationCancelView", applications: list[dict]):
+        self.parent_view = parent_view
+        self.applications = applications
+
+        options: list[discord.SelectOption] = []
+        for app in applications:
+            days_text = format_days(app.get("available_days") or [])
+            description = f"{app['race_name']} / {app['server_name']} | {days_text}"
+
+            options.append(
+                discord.SelectOption(
+                    label=str(app["character_name"])[:100],
+                    description=description[:100],
+                    value=str(app["id"]),
+                )
+            )
+
+        super().__init__(
+            placeholder="취소할 종족/서버 신청 내역을 선택하세요",
+            min_values=1,
+            max_values=1,
+            options=options[:25],
+            row=0,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        selected_id = int(self.values[0])
+
+        selected_application = None
+        for app in self.applications:
+            if int(app["id"]) == selected_id:
+                selected_application = app
+                break
+
+        if selected_application is None:
+            await interaction.response.send_message(
+                "선택한 신청 내역을 찾을 수 없습니다.",
+                ephemeral=True,
+            )
+            return
+
+        self.parent_view.selected_application = selected_application
+        self.parent_view.value = "submit"
+
+        for item in self.parent_view.children:
+            item.disabled = True
+
+        await interaction.response.edit_message(
+            content=(
+                "취소할 신청 내역이 선택되었습니다.\n"
+                f"- 캐릭터: **{selected_application['character_name']}**\n"
+                f"- 종족/서버: **{selected_application['race_name']} / {selected_application['server_name']}**"
+            ),
+            view=self.parent_view,
+        )
+        self.parent_view.stop()
+
+
+class ApplicationCancelView(discord.ui.View):
+    def __init__(self, user_id: int, applications: list[dict]):
+        super().__init__(timeout=120)
+        self.user_id = user_id
+        self.applications = applications
+        self.value: str | None = None
+        self.selected_application: dict | None = None
+
+        self.add_item(ApplicationCancelSelect(self, applications))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(
+                "이 UI는 명령어를 실행한 사용자만 사용할 수 있습니다.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    async def on_timeout(self) -> None:
+        for item in self.children:
+            item.disabled = True
+
+    @discord.ui.button(label="취소", style=discord.ButtonStyle.secondary, row=1)
+    async def cancel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.value = "cancel"
+
+        for item in self.children:
+            item.disabled = True
+
+        await interaction.response.edit_message(
+            content="신청 취소가 취소되었습니다.",
+            view=self,
+        )
+        self.stop()
 
 
 # =========================================================
