@@ -1337,7 +1337,24 @@ async def update_application_command(
             )
             return
 
-        # 4) 아툴 재조회
+        # 4) 이미 공대 생성에 반영된 캐릭터인지 확인
+        generated_rows = list_raid_parties(
+            guild_id=interaction.guild.id,
+            raid_name=레이드이름,
+            weekday=None,
+        )
+
+        already_generated = False
+        for row in generated_rows:
+            if (
+                str(row.get("race_code")).strip() == race_code
+                and str(row.get("server_code")).strip() == server_code
+                and str(row.get("character_name")).strip() == 캐릭터명
+            ):
+                already_generated = True
+                break
+
+        # 5) 아툴 재조회
         data = get_character_info(
             race_code=race_code,
             race_name=race_name,
@@ -1346,7 +1363,7 @@ async def update_application_command(
             character_name=캐릭터명,
         )
 
-        # 5) 입장 조건 재검사
+        # 6) 입장 조건 재검사
         condition_type = str(raid["condition_type"])
         condition_value = int(raid["condition_value"])
 
@@ -1366,7 +1383,7 @@ async def update_application_command(
             )
             return
 
-        # 6) 요일/특이사항 다시 입력
+        # 7) 요일/특이사항 다시 입력
         initial_days = existing.get("available_days") or []
         initial_note = (existing.get("note") or "").strip()
 
@@ -1399,7 +1416,7 @@ async def update_application_command(
         available_days = weekday_view.selected_days
         note = weekday_view.note
 
-        # 7) DB 수정
+        # 8) DB 수정
         update_application(
             int(existing["id"]),
             {
@@ -1419,7 +1436,7 @@ async def update_application_command(
             },
         )
 
-        # 8) 공개 수정 완료 메시지
+        # 9) 공개 수정 완료 메시지
         embed = build_application_update_embed(
             raid_name=레이드이름,
             data=data,
@@ -1429,10 +1446,19 @@ async def update_application_command(
         )
         await interaction.followup.send(embed=embed, ephemeral=False)
 
-        await interaction.followup.send(
-            "신청 수정이 저장되었습니다.",
-            ephemeral=True,
-        )
+        if already_generated:
+            await interaction.followup.send(
+                "신청 수정이 저장되었습니다.\n"
+                "※ 이미 생성된 공대에는 이번 주 자동 반영되지 않습니다.\n"
+                "※ 수정된 신청 내용은 다음 공대 생성부터 반영됩니다.\n"
+                "※ 이번 주 공대 변경이 필요하면 관리자에게 문의하세요.",
+                ephemeral=True,
+            )
+        else:
+            await interaction.followup.send(
+                "신청 수정이 저장되었습니다.",
+                ephemeral=True,
+            )
 
     except AtoolError as e:
         await interaction.followup.send(
@@ -1504,8 +1530,23 @@ async def create_parties_command(
                 ephemeral=True,
             )
             return
+            
+        # 2) 같은 요일 공대가 이미 생성되어 있으면 재생성 차단
+        existing_same_weekday_rows = list_raid_parties(
+            guild_id=interaction.guild.id,
+            raid_name=raid_name,
+            weekday=weekday,
+        )
 
-        # 2) 해당 요일 신청자 조회
+        if existing_same_weekday_rows:
+            await interaction.followup.send(
+                f"`{raid_name}` 레이드의 `{weekday}` 공대는 이미 생성되어 있습니다.\n"
+                "먼저 `/공대초기화` 후 다시 생성하세요.",
+                ephemeral=True,
+            )
+            return
+
+        # 3) 해당 요일 신청자 조회
         applications = list_raid_applications_by_weekday(
             guild_id=interaction.guild.id,
             raid_name=raid_name,
@@ -1519,34 +1560,35 @@ async def create_parties_command(
             )
             return
 
-        # 3) 이미 생성된 공대 내역 조회
-        existing_rows = list_raid_parties(
+        # 4) 같은 레이드의 전체 요일 공대 내역 조회
+        # 다른 요일에 이미 배정된 캐릭터도 이번 생성에서 제외하기 위함
+        all_existing_rows = list_raid_parties(
             guild_id=interaction.guild.id,
             raid_name=raid_name,
-            weekday=weekday,
+            weekday=None,
         )
 
-        # 4) 이미 생성된 캐릭터 제외
-        candidates = exclude_already_generated_characters(applications, existing_rows)
+        # 5) 이미 생성된 캐릭터 제외
+        candidates = exclude_already_generated_characters(applications, all_existing_rows)
 
         if not candidates:
             await interaction.followup.send(
-                f"`{raid_name}` 레이드의 `{weekday}` 신청자 중 "
-                "새로 생성할 수 있는 캐릭터가 없습니다.\n"
-                "이미 생성된 공대에 모두 포함되어 있을 수 있습니다.",
+                f"`{raid_name}` 레이드의 `{weekday}` 신청자 중 새로 생성할 수 있는 캐릭터가 없습니다.\n"
+                "이미 같은 레이드의 다른 요일 공대에 배정된 캐릭터일 수 있습니다.",
                 ephemeral=True,
             )
             return
 
-        # 5) 공대 생성 시점 기준 아툴 재조회
+
+        # 6) 공대 생성 시점 기준 아툴 재조회
         refreshed_candidates, refresh_warnings = refresh_candidates_for_party_generation(candidates)
 
-        # 6) 기존 규칙 불러오기
+        # 7) 기존 규칙 불러오기
         initial_rules = load_party_rules(interaction.guild.id, raid_name)
         if not initial_rules:
             initial_rules = build_default_all_slot_rules()
 
-        # 7) 규칙 UI
+        # 8) 규칙 UI
         rule_view = PartyRuleSetupView(
             user_id=interaction.user.id,
             initial_rules=initial_rules,
@@ -1575,7 +1617,7 @@ async def create_parties_command(
 
         slot_rules = rule_view.exported_rules
 
-        # 8) 규칙 저장
+        # 9) 규칙 저장
         save_party_rules(
             guild_id=interaction.guild.id,
             raid_name=raid_name,
@@ -1583,7 +1625,7 @@ async def create_parties_command(
             updated_by=interaction.user.id,
         )
 
-        # 9) 재조회된 값으로 공대 생성
+        # 10) 재조회된 값으로 공대 생성
         raids, waiting_members, warnings = build_balanced_raids(
             candidates=refreshed_candidates,
             slot_rules=slot_rules,
@@ -1596,7 +1638,7 @@ async def create_parties_command(
             )
             return
 
-        # 10) DB 저장용 row 변환
+        # 11) DB 저장용 row 변환
         rows = flatten_raids_to_party_rows(
             guild_id=interaction.guild.id,
             raid_name=raid_name,
@@ -1605,7 +1647,7 @@ async def create_parties_command(
             waiting_members=waiting_members,
         )
 
-        # 11) 저장
+        # 12) 저장
         replace_raid_parties(
             guild_id=interaction.guild.id,
             raid_name=raid_name,
@@ -1613,7 +1655,7 @@ async def create_parties_command(
             members=rows,
         )
 
-        # 12) 결과 출력
+        # 13) 결과 출력
         source_note = "설정한 공대 규칙 기준 / 공대 생성 시점 기준"
         embed = build_raid_result_embed(
             raid_name=raid_name,
