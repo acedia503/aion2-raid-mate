@@ -236,6 +236,7 @@ class WeekdayMultiSelectView(discord.ui.View):
     async def on_timeout(self) -> None:
         for item in self.children:
             item.disabled = True
+        self.stop()
 
     def build_summary_text(self, saved: bool = False, note_entered: bool = False) -> str:
         days_text = format_days(self.selected_days)
