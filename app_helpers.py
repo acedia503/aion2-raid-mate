@@ -21,6 +21,12 @@ def safe_str(value: Any, default: str = "") -> str:
     return text if text else default
 
 
+def is_admin(interaction: discord.Interaction) -> bool:
+    if interaction.guild is None:
+        return False
+    return bool(interaction.user.guild_permissions.administrator)
+
+
 def format_days(days: list[str]) -> str:
     return ", ".join(days) if days else "-"
 
@@ -49,6 +55,22 @@ def split_text_by_lines(text: str, limit: int = 1800) -> list[str]:
     return chunks if chunks else ["-"]
 
 
+def get_server_by_code(server_code: str) -> dict | None:
+    for server in SERVER_OPTIONS:
+        if str(server["code"]) == str(server_code):
+            return server
+    return None
+
+
+def get_race_by_code(race_code: str) -> dict | None:
+    from constants import RACE_OPTIONS
+
+    for race in RACE_OPTIONS:
+        if str(race["code"]) == str(race_code):
+            return race
+    return None
+
+
 def get_race_name_by_code(race_code: str) -> str | None:
     for race in RACE_OPTIONS:
         if safe_str(race["code"]) == safe_str(race_code):
@@ -65,12 +87,6 @@ def get_server_name_by_code(server_code: str) -> str | None:
 
 def get_servers_for_race(race_code: str) -> list[dict]:
     return [dict(server) for server in SERVERS_BY_RACE.get(safe_str(race_code), [])]
-
-
-def is_admin(interaction: discord.Interaction) -> bool:
-    if interaction.guild is None:
-        return False
-    return bool(interaction.user.guild_permissions.administrator)
 
 
 def make_character_key(row: dict) -> tuple[str, str, str]:
