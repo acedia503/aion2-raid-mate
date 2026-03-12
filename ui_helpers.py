@@ -253,6 +253,7 @@ def build_raid_result_embed(
     weekday: str,
     raids: list[dict],
     waiting_members: list[dict],
+    cross_weekday_members: list[dict] | None = None,
     source_note: str | None = None,
 ) -> discord.Embed:
     assigned_count = sum(len(raid.get("party1", [])) + len(raid.get("party2", [])) for raid in raids)
