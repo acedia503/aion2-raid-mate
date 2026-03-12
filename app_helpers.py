@@ -7,6 +7,10 @@ import discord
 from constants import RACE_OPTIONS, SERVER_OPTIONS, SERVERS_BY_RACE
 
 
+# =========================
+# 기본 유틸
+# =========================
+
 def safe_int(value: Any, default: int = 0) -> int:
     try:
         return int(value)
@@ -19,12 +23,6 @@ def safe_str(value: Any, default: str = "") -> str:
         return default
     text = str(value).strip()
     return text if text else default
-
-
-def is_admin(interaction: discord.Interaction) -> bool:
-    if interaction.guild is None:
-        return False
-    return bool(interaction.user.guild_permissions.administrator)
 
 
 def format_days(days: list[str]) -> str:
@@ -55,39 +53,65 @@ def split_text_by_lines(text: str, limit: int = 1800) -> list[str]:
     return chunks if chunks else ["-"]
 
 
-def get_server_by_code(server_code: str) -> dict | None:
-    for server in SERVER_OPTIONS:
-        if str(server["code"]) == str(server_code):
-            return server
-    return None
+# =========================
+# lookup 캐시 (속도 개선)
+# =========================
 
+RACE_CODE_MAP = {safe_str(r["code"]): r for r in RACE_OPTIONS}
+SERVER_CODE_MAP = {safe_str(s["code"]): s for s in SERVER_OPTIONS}
+
+
+# =========================
+# race 조회
+# =========================
 
 def get_race_by_code(race_code: str) -> dict | None:
-    from constants import RACE_OPTIONS
-
-    for race in RACE_OPTIONS:
-        if str(race["code"]) == str(race_code):
-            return race
-    return None
+    return RACE_CODE_MAP.get(safe_str(race_code))
 
 
 def get_race_name_by_code(race_code: str) -> str | None:
-    for race in RACE_OPTIONS:
-        if safe_str(race["code"]) == safe_str(race_code):
-            return safe_str(race["name"])
+    race = get_race_by_code(race_code)
+    if race:
+        return safe_str(race.get("name"))
     return None
+
+
+# =========================
+# server 조회
+# =========================
+
+def get_server_by_code(server_code: str) -> dict | None:
+    return SERVER_CODE_MAP.get(safe_str(server_code))
 
 
 def get_server_name_by_code(server_code: str) -> str | None:
-    for server in SERVER_OPTIONS:
-        if safe_str(server["code"]) == safe_str(server_code):
-            return safe_str(server["name"])
+    server = get_server_by_code(server_code)
+    if server:
+        return safe_str(server.get("name"))
     return None
 
+
+# =========================
+# race별 서버 목록
+# =========================
 
 def get_servers_for_race(race_code: str) -> list[dict]:
     return [dict(server) for server in SERVERS_BY_RACE.get(safe_str(race_code), [])]
 
+
+# =========================
+# 관리자 체크
+# =========================
+
+def is_admin(interaction: discord.Interaction) -> bool:
+    if interaction.guild is None:
+        return False
+    return interaction.user.guild_permissions.administrator
+
+
+# =========================
+# 이건 뭐지..?
+# =========================
 
 def make_character_key(row: dict) -> tuple[str, str, str]:
     return (
