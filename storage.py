@@ -394,6 +394,46 @@ def swap_party_members_position(first_row_id: int, first_weekday: str, first_rai
 def list_raid_applications_filtered(
     guild_id: int,
     raid_name: str,
-    user_name: str | None = None,
-    character_name: str | None = None,
+    filter_type: str | None = None,
+    filter_value: str | None = None,
 ) -> list[dict]:
+    base_sql = """
+    SELECT
+        id,
+        guild_id,
+        user_id,
+        user_name,
+        raid_name,
+        race_code,
+        race_name,
+        server_code,
+        server_name,
+        character_name,
+        job_name,
+        note,
+        available_days,
+        created_at,
+        updated_at
+    FROM applications
+    WHERE guild_id = %s
+      AND raid_name = %s
+    """
+
+    params: list = [guild_id, raid_name.strip()]
+
+    if filter_type and filter_value:
+        normalized_type = str(filter_type).strip()
+        normalized_value = f"%{str(filter_value).strip()}%"
+
+        if normalized_type == "디코이름":
+            base_sql += " AND user_name ILIKE %s"
+            params.append(normalized_value)
+        elif normalized_type == "캐릭터명":
+            base_sql += " AND character_name ILIKE %s"
+            params.append(normalized_value)
+
+    base_sql += """
+    ORDER BY user_name ASC, character_name ASC, race_name ASC, server_name ASC;
+    """
+
+    return fetch_all(base_sql, tuple(params))
