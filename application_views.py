@@ -379,3 +379,104 @@ class ApplicationNoteModal(discord.ui.Modal, title="특이사항 입력"):
             view=self.parent_view,
         )
         self.parent_view.stop()
+
+
+# =========================================================
+# 강제삭제용 종족/서버 선택 UI
+# =========================================================
+
+class ForceDeleteRaceServerSelect(discord.ui.Select):
+    def __init__(self, parent_view: "ForceDeleteRaceServerView", applications: list[dict]):
+        self.parent_view = parent_view
+        self.applications = applications
+
+        options: list[discord.SelectOption] = []
+        for app in applications:
+            label = f"{app['race_name']} / {app['server_name']}"
+            description = f"{app['character_name']} | {app['job_name']} | {app['combat_score']}"
+            value = str(app["id"])
+
+            options.append(
+                discord.SelectOption(
+                    label=label[:100],
+                    description=description[:100],
+                    value=value,
+                )
+            )
+
+        super().__init__(
+            placeholder="삭제할 종족/서버를 선택하세요",
+            min_values=1,
+            max_values=1,
+            options=options[:25],
+            row=0,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        selected_id = int(self.values[0])
+
+        selected_application = None
+        for app in self.applications:
+            if int(app["id"]) == selected_id:
+                selected_application = app
+                break
+
+        if selected_application is None:
+            await interaction.response.send_message(
+                "선택한 신청 내역을 찾을 수 없습니다.",
+                ephemeral=True,
+            )
+            return
+
+        self.parent_view.selected_application = selected_application
+        self.parent_view.value = "submit"
+
+        for item in self.parent_view.children:
+            item.disabled = True
+
+        await interaction.response.edit_message(
+            content=(
+                "삭제할 신청 내역이 선택되었습니다.\n"
+                f"- 캐릭터: **{selected_application['character_name']}**\n"
+                f"- 종족/서버: **{selected_application['race_name']} / {selected_application['server_name']}**"
+            ),
+            view=self.parent_view,
+        )
+        self.parent_view.stop()
+
+
+class ForceDeleteRaceServerView(discord.ui.View):
+    def __init__(self, user_id: int, applications: list[dict]):
+        super().__init__(timeout=120)
+        self.user_id = user_id
+        self.applications = applications
+        self.value: str | None = None
+        self.selected_application: dict | None = None
+
+        self.add_item(ForceDeleteRaceServerSelect(self, applications))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(
+                "이 UI는 명령어를 실행한 관리자만 사용할 수 있습니다.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    async def on_timeout(self) -> None:
+        for item in self.children:
+            item.disabled = True
+
+    @discord.ui.button(label="취소", style=discord.ButtonStyle.secondary, row=1)
+    async def cancel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.value = "cancel"
+
+        for item in self.children:
+            item.disabled = True
+
+        await interaction.response.edit_message(
+            content="강제삭제가 취소되었습니다.",
+            view=self,
+        )
+        self.stop()
