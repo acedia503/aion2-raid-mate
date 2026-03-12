@@ -381,3 +381,23 @@ def build_force_delete_result_text(application: dict) -> str:
         f"- 가능 요일: {days_text}\n"
         f"- 특이사항: {note}"
     )
+
+
+def format_waiting_only_text(raid_name: str, weekday: str, waiting_members: list[dict], assigned_other_weekday_members: list[dict]) -> str:
+    lines = [f"[{raid_name}] {weekday} 대기 확인", "", "대기 인원"]
+    if waiting_members:
+        for member in waiting_members:
+            lines.append(
+                f"  - {member.get('character_name', '-')} | {member.get('race_name', '-')} / {member.get('server_name', '-')} | {member.get('job_name', '-')} | {member.get('item_level', 0)} | {member.get('combat_score', 0)}"
+            )
+    else:
+        lines.append("  - 없음")
+    lines.extend(["", "타 요일 배정 인원"])
+    if assigned_other_weekday_members:
+        for member in assigned_other_weekday_members:
+            lines.append(
+                f"  - {member.get('character_name', '-')} | {member.get('race_name', '-')} / {member.get('server_name', '-')} | 배정 요일: {member.get('assigned_weekday', '-')}"
+            )
+    else:
+        lines.append("  - 없음")
+    return "\n".join(lines)
