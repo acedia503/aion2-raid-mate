@@ -282,3 +282,18 @@ def convert_rows_to_raid_structure(rows: list[dict]) -> tuple[list[dict], list[d
         raids.append(raid)
 
     return raids, waiting_members
+
+
+        if already_generated:
+            await interaction.followup.send(
+                "신청 수정이 저장되었습니다.\n"
+                "※ 이미 생성된 공대에는 이번 주 자동 반영되지 않습니다.\n"
+                "※ 수정된 신청 내용은 다음 공대 생성부터 반영됩니다.\n"
+                "※ 이번 주 공대 변경이 필요하면 관리자에게 문의하세요.",
+                ephemeral=True,
+            )
+        else:
+            await interaction.followup.send(
+                "신청 수정이 저장되었습니다.",
+                ephemeral=True,
+            )
