@@ -297,3 +297,49 @@ def convert_rows_to_raid_structure(rows: list[dict]) -> tuple[list[dict], list[d
                 "신청 수정이 저장되었습니다.",
                 ephemeral=True,
             )
+
+
+def split_members_already_assigned_other_weekday(
+    candidates: list[dict],
+    other_weekday_assigned_rows: list[dict],
+) -> tuple[list[dict], list[dict]]:
+    assigned_map: dict[tuple[str, str, str], dict] = {}
+
+    for row in other_weekday_assigned_rows:
+        key = (
+            safe_str(row.get("race_code")),
+            safe_str(row.get("server_code")),
+            safe_str(row.get("character_name")),
+        )
+        assigned_map[key] = row
+
+    available_candidates: list[dict] = []
+    cross_weekday_members: list[dict] = []
+
+    for candidate in candidates:
+        key = (
+            safe_str(candidate.get("race_code")),
+            safe_str(candidate.get("server_code")),
+            safe_str(candidate.get("character_name")),
+        )
+
+        matched = assigned_map.get(key)
+        if matched:
+            cross_weekday_members.append(
+                {
+                    "character_name": candidate.get("character_name"),
+                    "race_name": candidate.get("race_name"),
+                    "server_name": candidate.get("server_name"),
+                    "job_name": candidate.get("job_name"),
+                    "item_level": candidate.get("item_level"),
+                    "combat_score": candidate.get("combat_score"),
+                    "assigned_weekday": matched.get("weekday"),
+                    "assigned_raid_no": matched.get("raid_no"),
+                    "assigned_party_no": matched.get("party_no"),
+                    "assigned_slot_no": matched.get("slot_no"),
+                }
+            )
+        else:
+            available_candidates.append(candidate)
+
+    return available_candidates, cross_weekday_members
