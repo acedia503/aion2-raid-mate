@@ -31,6 +31,7 @@ class PartyConfirmVisibilityView(discord.ui.View):
     async def on_timeout(self) -> None:
         for item in self.children:
             item.disabled = True
+        self.stop()
 
     @discord.ui.button(label="나만 보기", style=discord.ButtonStyle.secondary)
     async def private_button(self, interaction: discord.Interaction, button: discord.ui.Button):
