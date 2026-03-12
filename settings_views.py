@@ -51,6 +51,7 @@ class GuildSettingView(discord.ui.View):
     async def on_timeout(self) -> None:
         for item in self.children:
             item.disabled = True
+        self.stop()
 
     @discord.ui.button(label="저장", style=discord.ButtonStyle.success, row=2)
     async def save_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -82,6 +83,7 @@ class GuildSettingView(discord.ui.View):
                 ),
                 view=self,
             )
+            self.stop()
         except Exception as e:
             await interaction.response.send_message(
                 f"설정 저장 중 오류가 발생했습니다.\n`{e}`",
