@@ -1411,3 +1411,20 @@ def swap_party_members_position(
                 ),
             )
         conn.commit()
+
+
+def list_other_weekday_assigned_members(
+    guild_id: int,
+    raid_name: str,
+    weekday: str,
+) -> list[dict]:
+    sql = """
+    SELECT *
+    FROM raid_parties
+    WHERE guild_id = %s
+      AND raid_name = %s
+      AND weekday <> %s
+      AND status = 'ASSIGNED'
+    ORDER BY weekday ASC, raid_no ASC, party_no ASC, slot_no ASC;
+    """
+    return fetch_all(sql, (guild_id, raid_name.strip(), weekday.strip()))
