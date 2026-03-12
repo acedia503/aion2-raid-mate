@@ -106,6 +106,76 @@ def format_application_line(app: dict) -> str:
     )
 
 
+def format_application_admin_list_line(app: dict) -> str:
+    days_text = format_days(app.get("available_days") or [])
+    note_text = (app.get("note") or "").strip() or "-"
+
+    return (
+        f"{app.get('user_name', '-')} | "
+        f"{app.get('character_name', '-')} | "
+        f"{app.get('race_name', '-')} / {app.get('server_name', '-')} | "
+        f"{app.get('job_name', '-')} | "
+        f"{days_text} | "
+        f"{note_text}"
+    )
+
+
+def build_application_list_text(
+    raid_name: str,
+    applications: list[dict],
+    filter_type: str | None = None,
+    filter_value: str | None = None,
+) -> str:
+    lines: list[str] = []
+
+    title = f"[{raid_name}] 신청 목록"
+    if filter_type and filter_value:
+        title += f" ({filter_type}: {filter_value})"
+
+    lines.append(title)
+    lines.append("")
+
+    header = "디코이름 | 캐릭터명 | 종족/서버 | 직업 | 가능요일 | 특이사항"
+    separator = "-" * len(header)
+
+    lines.append(header)
+    lines.append(separator)
+
+    if applications:
+        for app in applications:
+            lines.append(format_application_admin_list_line(app))
+    else:
+        lines.append("- 신청자가 없습니다.")
+
+    return "\n".join(lines)
+
+
+def build_application_list_summary_embed(
+    raid_name: str,
+    applications: list[dict],
+    filter_type: str | None = None,
+    filter_value: str | None = None,
+) -> discord.Embed:
+    title = f"[{raid_name}] 신청 목록"
+    if filter_type and filter_value:
+        title += " 조회 결과"
+
+    embed = discord.Embed(
+        title=title,
+        color=discord.Color.blue(),
+    )
+    embed.add_field(name="신청자 수", value=str(len(applications)), inline=False)
+
+    if filter_type and filter_value:
+        embed.add_field(
+            name="필터",
+            value=f"{filter_type}: {filter_value}",
+            inline=False,
+        )
+
+    return embed
+
+
 def group_applications_by_raid(applications: list[dict]) -> dict[str, list[dict]]:
     result: dict[str, list[dict]] = {}
     for app in applications:
