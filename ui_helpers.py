@@ -1,11 +1,13 @@
-# ui_helpers.py
-# 보여주기 위한 출력용 함수
-
 from __future__ import annotations
+
+import re
 
 import discord
 
 from app_helpers import format_days, split_text_by_lines
+
+
+RAID_HEADER_PATTERN = re.compile(r"^\d+공대\s*\|")
 
 
 async def send_long_text_followup(
@@ -23,19 +25,10 @@ async def send_long_text_followup(
 
 
 def split_raid_text_by_sections(text: str, limit: int = 1800) -> list[str]:
-    """
-    공대 결과 텍스트를 섹션 단위로 분리한다.
-    우선순위:
-    1) 'N공대 |' 로 시작하는 공대 블록
-    2) '대기 인원'
-    3) 맨 앞 헤더
-    """
-
     if not text:
         return ["-"]
 
     lines = text.splitlines()
-
     sections: list[str] = []
     current_section: list[str] = []
 
@@ -47,14 +40,13 @@ def split_raid_text_by_sections(text: str, limit: int = 1800) -> list[str]:
 
     for line in lines:
         stripped = line.strip()
-
         is_new_section = False
 
-        if stripped.endswith("공대 생성 결과") or stripped.endswith("공대 확인"):
+        if stripped.endswith("공대 생성 결과") or stripped.endswith("공대 확인") or stripped.endswith("대기 확인"):
             is_new_section = True
-        elif "공대 | 총 아툴" in stripped:
+        elif RAID_HEADER_PATTERN.match(stripped):
             is_new_section = True
-        elif stripped == "대기 인원":
+        elif stripped in {"대기 인원", "타 요일 배정 인원"}:
             is_new_section = True
 
         if is_new_section:
@@ -75,9 +67,7 @@ def split_raid_text_by_sections(text: str, limit: int = 1800) -> list[str]:
             if len(section) <= limit:
                 current_chunk = section
             else:
-                # 섹션 자체가 limit 초과면 기존 줄 단위 분할로 fallback
-                sub_chunks = split_text_by_lines(section, limit=limit)
-                chunks.extend(sub_chunks)
+                chunks.extend(split_text_by_lines(section, limit=limit))
         else:
             candidate = f"{current_chunk}\n\n{section}"
             if len(candidate) <= limit:
@@ -88,19 +78,20 @@ def split_raid_text_by_sections(text: str, limit: int = 1800) -> list[str]:
                     current_chunk = section
                 else:
                     sub_chunks = split_text_by_lines(section, limit=limit)
-                    chunks.extend(sub_chunks[:-1])
-                    current_chunk = sub_chunks[-1] if sub_chunks else ""
+                    if sub_chunks:
+                        chunks.extend(sub_chunks[:-1])
+                        current_chunk = sub_chunks[-1]
+                    else:
+                        current_chunk = ""
 
     if current_chunk:
         chunks.append(current_chunk)
 
     return chunks if chunks else ["-"]
-    
 
-# 신청 한 줄 포맷 함수
+
 def format_application_line(app: dict) -> str:
     days_text = format_days(app.get("available_days") or [])
-
     note = (app.get("note") or "").strip()
     note_text = note if note else "-"
 
@@ -115,51 +106,40 @@ def format_application_line(app: dict) -> str:
     )
 
 
-# 레이드별 신청내역 그룹화
 def group_applications_by_raid(applications: list[dict]) -> dict[str, list[dict]]:
     result: dict[str, list[dict]] = {}
-
     for app in applications:
         raid_name = app["raid_name"]
-        if raid_name not in result:
-            result[raid_name] = []
-        result[raid_name].append(app)
-
+        result.setdefault(raid_name, []).append(app)
     return result
 
 
-# 레이드별 Embed 생성 함수
 def build_raid_application_embed(raid_name: str, applications: list[dict]) -> discord.Embed:
     embed = discord.Embed(
         title=f"[{raid_name}] 신청 내역",
         color=discord.Color.blue(),
     )
 
-    header = (
-        "캐릭터 | 종족/서버 | 직업 | 템렙 | 아툴 | 가능요일 | 특이사항"
-    )
-
+    header = "캐릭터 | 종족/서버 | 직업 | 템렙 | 아툴 | 가능요일 | 특이사항"
     separator = "-" * len(header)
-
-    lines = []
-
-    for app in applications:
-        lines.append(format_application_line(app))
-
+    lines = [format_application_line(app) for app in applications]
     body = "\n".join(lines) if lines else "-"
+    text = f"{header}\n{separator}\n{body}"
 
-    embed.description = (
-        "```"
-        f"{header}\n"
-        f"{separator}\n"
-        f"{body}"
-        "```"
-    )
+    if len(text) <= 3900:
+        embed.description = f"```\n{text}\n```"
+        return embed
 
+    chunks = split_text_by_lines(text, limit=950)
+    for index, chunk in enumerate(chunks, start=1):
+        embed.add_field(
+            name=f"신청 내역 {index}",
+            value=f"```\n{chunk}\n```",
+            inline=False,
+        )
     return embed
 
 
-# 공대 결과 포맷
 def party_score_sum(party: list[dict]) -> int:
     return sum(int(member.get("combat_score", 0)) for member in party)
 
@@ -186,21 +166,17 @@ def format_raid_result_text(
     cross_weekday_members: list[dict] | None = None,
     source_note: str | None = None,
 ) -> str:
-    lines: list[str] = []
-    lines.append(f"[{raid_name}] {weekday} 공대 생성 결과")
-    lines.append("")
+    lines: list[str] = [f"[{raid_name}] {weekday} 공대 생성 결과", ""]
 
     for raid in raids:
         raid_no = raid.get("raid_no", 0)
         party1 = raid.get("party1", [])
         party2 = raid.get("party2", [])
-
         total_members = len(party1) + len(party2)
         total_score = raid_score_sum_for_display(raid)
         avg_score = total_score // total_members if total_members else 0
 
         lines.append(f"{raid_no}공대 | 총 아툴 {total_score} | 평균 {avg_score}")
-
         lines.append("  1파티")
         if party1:
             for member in party1:
@@ -215,7 +191,6 @@ def format_raid_result_text(
                 lines.append(f"    - {format_party_member_line(member)}")
         else:
             lines.append("    - 비어 있음")
-
         lines.append("")
 
     lines.append("대기 인원")
@@ -242,8 +217,7 @@ def format_raid_result_text(
         lines.append("  - 없음")
 
     if source_note:
-        lines.append("")
-        lines.append(f"※ {source_note}")
+        lines.extend(["", f"※ {source_note}"])
 
     return "\n".join(lines)
 
@@ -257,20 +231,16 @@ def build_raid_result_embed(
     source_note: str | None = None,
 ) -> discord.Embed:
     assigned_count = sum(len(raid.get("party1", [])) + len(raid.get("party2", [])) for raid in raids)
-    waiting_count = len(waiting_members)
-
     embed = discord.Embed(
         title=f"[{raid_name}] {weekday} 공대 생성 결과",
         color=discord.Color.green(),
     )
     embed.add_field(name="생성 공대 수", value=str(len(raids)), inline=False)
     embed.add_field(name="배정 인원", value=str(assigned_count), inline=False)
-    embed.add_field(name="대기 인원", value=str(waiting_count), inline=False)
+    embed.add_field(name="대기 인원", value=str(len(waiting_members)), inline=False)
     embed.add_field(name="타 요일 배정 인원", value=str(len(cross_weekday_members or [])), inline=False)
-
     if source_note:
         embed.set_footer(text=source_note)
-
     return embed
 
 
@@ -282,13 +252,8 @@ def build_party_check_embed(
 ) -> discord.Embed:
     assigned_count = sum(len(raid.get("party1", [])) + len(raid.get("party2", [])) for raid in raids)
     waiting_count = len(waiting_members)
-
     title = f"[{raid_name}] 공대 확인" if weekday is None else f"[{raid_name}] {weekday} 공대 확인"
-
-    embed = discord.Embed(
-        title=title,
-        color=discord.Color.blurple(),
-    )
+    embed = discord.Embed(title=title, color=discord.Color.blurple())
     embed.add_field(name="생성 공대 수", value=str(len(raids)), inline=False)
     embed.add_field(name="배정 인원", value=str(assigned_count), inline=False)
     embed.add_field(name="대기 인원", value=str(waiting_count), inline=False)
@@ -311,7 +276,6 @@ def format_party_check_text_for_weekday(
     )
 
 
-# 수정완료 공개 메시지용
 def build_application_update_embed(
     raid_name: str,
     data: dict,
@@ -319,31 +283,19 @@ def build_application_update_embed(
     note: str,
     show_race_server: bool = True,
 ) -> discord.Embed:
-    embed = discord.Embed(
-        title=f"[{raid_name}] 신청 수정 완료",
-        color=discord.Color.orange(),
-    )
+    embed = discord.Embed(title=f"[{raid_name}] 신청 수정 완료", color=discord.Color.orange())
     embed.add_field(name="캐릭터명", value=data["nickname"], inline=False)
-
     if show_race_server:
-        embed.add_field(
-            name="종족/종족서버",
-            value=f"{data['race_name']} / {data['server_name']}",
-            inline=False,
-        )
-
+        embed.add_field(name="종족/종족서버", value=f"{data['race_name']} / {data['server_name']}", inline=False)
     embed.add_field(name="직업", value=data["job_name"], inline=False)
     embed.add_field(name="템렙", value=str(data["item_level"]), inline=False)
     embed.add_field(name="아툴 점수", value=str(data["combat_score"]), inline=False)
     embed.add_field(name="가능 요일", value=format_days(available_days), inline=False)
-
     if note:
         embed.add_field(name="특이사항", value=note, inline=False)
-
     return embed
 
 
-# 공대 수정용
 def build_party_update_embed(
     raid_name: str,
     source_weekday: str,
@@ -355,11 +307,7 @@ def build_party_update_embed(
     replaced_member: dict | None = None,
     replace_mode: str | None = None,
 ) -> discord.Embed:
-    embed = discord.Embed(
-        title=f"[{raid_name}] 공대 수정 완료",
-        color=discord.Color.orange(),
-    )
-
+    embed = discord.Embed(title=f"[{raid_name}] 공대 수정 완료", color=discord.Color.orange())
     embed.add_field(
         name="이동 캐릭터",
         value=(
@@ -371,7 +319,6 @@ def build_party_update_embed(
         ),
         inline=False,
     )
-
     source_position = (
         "대기"
         if str(moved_member.get("status")) == "WAITING"
@@ -383,44 +330,29 @@ def build_party_update_embed(
         target_position = f"{target_weekday} / 대기"
     else:
         target_position = f"{target_weekday} / {target_raid_no}공대 {target_party_no}파티 {target_slot_no}번"
-
     embed.add_field(name="이동 위치", value=target_position, inline=False)
 
     if replaced_member is not None:
-        if replace_mode == "swap":
-            embed.add_field(
-                name="교체 캐릭터",
-                value=(
-                    f"{replaced_member['character_name']} | "
-                    f"{replaced_member['race_name']} / {replaced_member['server_name']} | "
-                    f"{replaced_member['job_name']} | "
-                    f"{replaced_member['item_level']} | "
-                    f"{replaced_member['combat_score']}"
-                ),
-                inline=False,
-            )
-        elif replace_mode == "waiting":
-            embed.add_field(
-                name="대기 이동 캐릭터",
-                value=(
-                    f"{replaced_member['character_name']} | "
-                    f"{replaced_member['race_name']} / {replaced_member['server_name']} | "
-                    f"{replaced_member['job_name']} | "
-                    f"{replaced_member['item_level']} | "
-                    f"{replaced_member['combat_score']}"
-                ),
-                inline=False,
-            )
+        label = "교체 캐릭터" if replace_mode == "swap" else "대기 이동 캐릭터"
+        embed.add_field(
+            name=label,
+            value=(
+                f"{replaced_member['character_name']} | "
+                f"{replaced_member['race_name']} / {replaced_member['server_name']} | "
+                f"{replaced_member['job_name']} | "
+                f"{replaced_member['item_level']} | "
+                f"{replaced_member['combat_score']}"
+            ),
+            inline=False,
+        )
 
     embed.set_footer(text="※ 템렙/아툴 점수는 공대 생성 시점 기준입니다.")
     return embed
 
 
-# 취소 완료 메시지용
 def build_cancel_result_text(application: dict) -> str:
     days_text = format_days(application.get("available_days") or [])
     note = (application.get("note") or "").strip() or "-"
-
     return (
         f"신청이 취소되었습니다.\n"
         f"- 레이드: {application['raid_name']}\n"
@@ -434,11 +366,9 @@ def build_cancel_result_text(application: dict) -> str:
     )
 
 
-# 강제삭제 결과 메시지용
 def build_force_delete_result_text(application: dict) -> str:
     days_text = format_days(application.get("available_days") or [])
     note = (application.get("note") or "").strip() or "-"
-
     return (
         f"신청 내역이 강제삭제되었습니다.\n"
         f"- 신청자: {application['user_name']}\n"
