@@ -18,6 +18,7 @@ from settings_views import (
 from application_views import (
     ApplicationRaceServerView,
     WeekdayMultiSelectView,
+    ApplicationCancelView,
     ForceDeleteRaceServerView,
 )
 
@@ -1036,8 +1037,36 @@ async def cancel_application_command(
             )
             return
 
-        # 같은 레이드 안에서 같은 캐릭터명은 유니크 구조라 보통 1건이어야 함
-        target = matched[0]
+        # 1건이면 바로 취소
+        if len(matched) == 1:
+            target = matched[0]
+
+        # 여러 건이면 종족/서버 선택 UI
+        else:
+            view = ApplicationCancelView(
+                user_id=interaction.user.id,
+                applications=matched,
+            )
+
+            await interaction.followup.send(
+                f"`{레이드이름}` 레이드에 `{캐릭터명}` 이름의 신청이 여러 건 있습니다.\n"
+                "취소할 종족/서버를 선택하세요.",
+                view=view,
+                ephemeral=True,
+            )
+
+            timeout = await view.wait()
+            if timeout:
+                await interaction.followup.send(
+                    "신청 취소 선택 시간이 초과되었습니다.",
+                    ephemeral=True,
+                )
+                return
+
+            if view.value != "submit" or view.selected_application is None:
+                return
+
+            target = view.selected_application
 
         deleted = delete_application(int(target["id"]))
         if not deleted:
@@ -1049,12 +1078,6 @@ async def cancel_application_command(
 
         await interaction.followup.send(
             build_cancel_result_text(target),
-            ephemeral=True,
-        )
-
-    except Exception as e:
-        await interaction.followup.send(
-            f"신청 취소 중 오류가 발생했습니다.\n`{e}`",
             ephemeral=True,
         )
 
