@@ -389,3 +389,11 @@ def swap_party_members_position(first_row_id: int, first_weekday: str, first_rai
             cur.execute("UPDATE raid_parties SET weekday = %s, raid_no = %s, party_no = %s, slot_no = %s, status = %s WHERE id = %s;", (first_weekday, int(first_raid_no), first_party_no, first_slot_no, first_status, int(second_row_id)))
             cur.execute("UPDATE raid_parties SET weekday = %s, raid_no = %s, party_no = %s, slot_no = %s, status = %s WHERE id = %s;", (second_weekday, int(second_raid_no), second_party_no, second_slot_no, second_status, int(first_row_id)))
         conn.commit()
+
+
+def list_raid_applications_filtered(
+    guild_id: int,
+    raid_name: str,
+    user_name: str | None = None,
+    character_name: str | None = None,
+) -> list[dict]:
