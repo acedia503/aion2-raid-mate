@@ -3,6 +3,10 @@ from __future__ import annotations
 from app_helpers import safe_int, safe_str
 
 
+def build_default_all_slot_rules() -> list[dict]:
+    return [{"slot_index": i, "role_type": "ALL", "preferred_jobs": []} for i in range(1, 9)]
+    
+
 def normalize_party_member_row(row: dict) -> dict:
     return {
         "id": safe_int(row.get("id")),
