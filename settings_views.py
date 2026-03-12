@@ -238,6 +238,7 @@ class RaidDeleteConfirmView(discord.ui.View):
     async def on_timeout(self) -> None:
         for item in self.children:
             item.disabled = True
+        self.stop()
 
     @discord.ui.button(label="신청자까지 같이 삭제", style=discord.ButtonStyle.danger)
     async def delete_with_applications(
