@@ -5,9 +5,23 @@ from __future__ import annotations
 
 import discord
 
-from app_helpers import format_days, split_text_by_lines, send_long_text_followup
+from app_helpers import format_days, split_text_by_lines
 
-    
+
+async def send_long_text_followup(
+    interaction: discord.Interaction,
+    text: str,
+    ephemeral: bool = False,
+    limit: int = 1800,
+):
+    chunks = split_text_by_lines(text, limit=limit)
+    for chunk in chunks:
+        await interaction.followup.send(
+            f"```text\n{chunk}\n```",
+            ephemeral=ephemeral,
+        )
+
+
 # 신청 한 줄 포맷 함수
 def format_application_line(app: dict) -> str:
     days_text = format_days(app.get("available_days") or [])
